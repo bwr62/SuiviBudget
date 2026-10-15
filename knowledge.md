@@ -16,7 +16,7 @@
 ---
 
 ## 2. ARCHITECTURE & STACK TECHNIQUE
-* **Version du projet** : `v0.02`
+* **Version du projet** : `v0.03`
 * **Architecture** : Monorepo npm avec workspaces (`server`, `client`).
 * **Frontend** : React 19, Vite 8, TypeScript strict (`ES2022`, `bundler`), Tailwind CSS (v4 via `@tailwindcss/vite`), Zustand, TanStack Query, Recharts, Lucide React, SimpleWebAuthn Browser (`Port: 5173`, proxy configuré vers `http://localhost:3001/api`).
 * **Backend** : Node.js (v26), Express, TypeScript strict (`ES2022`, `NodeNext`), Zod, SimpleWebAuthn Server, Argon2id, JWT (vérification stricte de secret >= 32 chars au démarrage), Helmet, CORS verrouillé, Cookie-parser, Express Rate Limit (`Port: 3001`).
@@ -124,12 +124,29 @@
 | `POST` | `/api/categories/:id/subcategories` | Oui | **NOUVEAU** : Ajout d'une sous-catégorie à une catégorie existante |
 | `PATCH` | `/api/subcategories/:id` | Oui | **NOUVEAU** : Renommage d'une sous-catégorie |
 | `DELETE`| `/api/subcategories/:id` | Oui | **NOUVEAU** : Suppression d'une sous-catégorie |
+| `GET` | `/api/backup/export/json` | Oui | **P1** : Sauvegarde et export complet des données au format JSON |
+| `GET` | `/api/backup/export/db` | Oui | **P1** : Téléchargement du fichier de base de données SQLite brut |
 | `GET` | `/api/stats/annual` | Oui | Statistiques annuelles (hors PENDING) |
 | `GET` | `/api/stats/category-distribution`| Oui| Répartition par catégorie |
 
 ---
 
 ## 7. JOURNAL DES MODIFICATIONS (CHANGELOG D'AUDIT)
+
+### [Version 0.03] - 2026-10-15
+* **Mise en œuvre des Recommandations d'Audit Prioritaires (P1 à P4)** :
+  * **P1 - Sauvegardes & Exports Autonomes** :
+    * Implémentation des endpoints `GET /api/backup/export/json` (export complet JSON avec horodatage) et `GET /api/backup/export/db` (téléchargement direct du fichier SQLite `budget.sqlite`).
+    * Ajout de boutons d'export conviviaux dans l'interface `CategoriesView.tsx`.
+  * **P2 - Prévention des Pertes de Données Accidentelles** :
+    * Ajout de modales de confirmation bloquantes avec alerte visuelle avant toute suppression de transaction financière dans `TransactionsTableView.tsx`.
+    * Ajout d'une confirmation de suppression pour les sous-catégories dans `CategoriesView.tsx`.
+  * **P3 - Persistance SQLite des Challenges WebAuthn avec TTL** :
+    * Création de la table `auth_challenges (key TEXT PRIMARY KEY, challenge TEXT, created_at INTEGER)` dans `server/src/db/schema.ts`.
+    * Remplacement du stockage volatile en mémoire vive par une persistance sécurisée en base SQLite avec TTL de 5 minutes et nettoyage automatique des entrées expirées dans `server/src/routes/auth.ts`.
+  * **P4 - Recherche Textuelle et Filtrage Rapide des Transactions** :
+    * Intégration d'une barre de recherche instantanée avec bouton de réinitialisation dans l'en-tête de `TransactionsTableView.tsx`.
+    * Filtrage multicritères en temps réel sur le libellé, le nom de catégorie, la sous-catégorie, le montant ou la date.
 
 ### [Version 0.02] - 2026-10-15
 * **Gestion Avancée des Catégories & Sous-Catégories** :

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, ToggleLeft, ToggleRight, Trash2, Calendar, Tag } from 'lucide-react';
+import { Plus, ToggleLeft, ToggleRight, Trash2, Calendar, Tag, Search, AlertCircle, X } from 'lucide-react';
 import { Transaction, Category, OperationType } from '../types';
 
 interface TransactionsTableViewProps {
@@ -31,14 +31,28 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
   const [formSubcategory, setFormSubcategory] = useState('');
   const [formRecurring, setFormRecurring] = useState(type === 'INCOME' || type === 'RECURRING_EXPENSE');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
 
   // Synchroniser la date par défaut lorsque le mois change
   React.useEffect(() => {
     setFormDate(`${currentMonthYear}-01`);
   }, [currentMonthYear]);
 
-  // Filtrer les transactions selon le type de la vue
-  const filteredTransactions = transactions.filter((t) => t.type === type);
+  // Filtrer les transactions selon le type de la vue et la recherche textuelle
+  const filteredTransactions = transactions
+    .filter((t) => t.type === type)
+    .filter((t) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      const titleMatch = t.title.toLowerCase().includes(q);
+      const catMatch = t.category_name?.toLowerCase().includes(q);
+      const subMatch = t.subcategory_name?.toLowerCase().includes(q);
+      const amountMatch = t.amount.toString().includes(q);
+      const dateMatch = t.date.includes(q);
+      return titleMatch || catMatch || subMatch || amountMatch || dateMatch;
+    });
+
   const relevantCategories = categories.filter((c) => c.type === type);
 
   const selectedCategoryObj = relevantCategories.find((c) => c.id === formCategory);
@@ -96,13 +110,35 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Ajouter une ligne</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher..."
+              className="bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44 sm:w-56"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="flex items-center gap-2 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Ajouter une ligne</span>
+          </button>
+        </div>
       </div>
 
       {/* Formulaire d'ajout rapide */}
@@ -342,7 +378,7 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
                         </button>
 
                         <button
-                          onClick={() => onDeleteTransaction(tx.id)}
+                          onClick={() => setDeletingTxId(tx.id)}
                           title="Supprimer"
                           className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
                         >
@@ -357,6 +393,46 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Modale de confirmation de suppression */}
+      {deletingTxId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-rose-500/10 text-rose-400 rounded-lg shrink-0">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-slate-100">Confirmer la suppression</h4>
+                <p className="text-xs text-slate-400 mt-1">
+                  Êtes-vous sûr de vouloir supprimer cette ligne ? Cette action est irréversible.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingTxId(null)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const id = deletingTxId;
+                  setDeletingTxId(null);
+                  if (id) await onDeleteTransaction(id);
+                }}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

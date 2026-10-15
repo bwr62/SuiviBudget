@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Tag, Layers, Edit2, Check, X, Trash2 } from 'lucide-react';
+import { Plus, Tag, Layers, Edit2, Check, X, Trash2, Download, Database, AlertCircle } from 'lucide-react';
 import { Category, OperationType } from '../types';
 
 interface CategoriesViewProps {
@@ -35,6 +35,9 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({ categories, onRe
   // Édition d'une sous-catégorie
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
   const [editingSubName, setEditingSubName] = useState('');
+
+  // Suppression d'une sous-catégorie (confirmation)
+  const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,22 +153,47 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({ categories, onRe
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header & Backup Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-xl">
         <div>
-          <h2 className="text-lg font-bold text-slate-100">Gestion des Catégories & Sous-catégories</h2>
+          <h2 className="text-lg font-bold text-slate-100">Gestion des Catégories & Sauvegardes</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Modifiez le nom ou la couleur d'une catégorie existante, et ajoutez ou renommez vos sous-catégories librement.
+            Personnalisez vos catégories et exportez une sauvegarde de sécurité de vos données financières.
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Nouvelle catégorie</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Export JSON */}
+          <a
+            href="/api/backup/export/json"
+            download
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-colors shadow-sm"
+            title="Exporter l'intégralité du budget au format JSON"
+          >
+            <Download className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Export JSON</span>
+          </a>
+
+          {/* Export SQLite brut */}
+          <a
+            href="/api/backup/export/db"
+            download
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-colors shadow-sm"
+            title="Télécharger une copie du fichier budget.sqlite brut"
+          >
+            <Database className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Backup SQLite</span>
+          </a>
+
+          {/* Nouvelle catégorie */}
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nouvelle catégorie</span>
+          </button>
+        </div>
       </div>
 
       {/* Add Modal */}
@@ -401,7 +429,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({ categories, onRe
                                     <Edit2 className="h-2.5 w-2.5" />
                                   </button>
                                   <button
-                                    onClick={() => handleDeleteSub(sub.id)}
+                                    onClick={() => setDeletingSubId(sub.id)}
                                     title="Supprimer"
                                     className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 ml-0.5 transition-opacity"
                                   >
@@ -473,6 +501,46 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({ categories, onRe
           </div>
         ))}
       </div>
+
+      {/* Modale de confirmation suppression sous-catégorie */}
+      {deletingSubId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-rose-500/10 text-rose-400 rounded-lg shrink-0">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-slate-100">Confirmer la suppression</h4>
+                <p className="text-xs text-slate-400 mt-1">
+                  Êtes-vous sûr de vouloir supprimer cette sous-catégorie ?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingSubId(null)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const id = deletingSubId;
+                  setDeletingSubId(null);
+                  if (id) await handleDeleteSub(id);
+                }}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

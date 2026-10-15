@@ -94,6 +94,12 @@ CREATE TABLE IF NOT EXISTS passkeys (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  key TEXT PRIMARY KEY,
+  challenge TEXT NOT NULL,
+  created_at INTEGER NOT NULL -- timestamp ms
+);
+
 -- 2. Catégories et Sous-catégories
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,

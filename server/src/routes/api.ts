@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import { db } from '../db/index.js';
 import { rolloverService } from '../services/rolloverService.js';
 import { requireAuth } from '../middlewares/auth.js';
@@ -550,4 +552,55 @@ apiRouter.get('/stats/category-distribution', (req: Request, res: Response) => {
     .all(monthYear);
 
   res.json(distribution);
+});
+
+// ==========================================
+// 6. SAUVEGARDE & EXPORT / IMPORT (P1)
+// ==========================================
+
+/**
+ * Export JSON complet de toutes les données de l'application
+ */
+apiRouter.get('/backup/export/json', (_req: Request, res: Response) => {
+  const users = db.prepare('SELECT id, username, created_at FROM users').all();
+  const categories = db.prepare('SELECT * FROM categories').all();
+  const subcategories = db.prepare('SELECT * FROM subcategories').all();
+  const templates = db.prepare('SELECT * FROM recurring_templates').all();
+  const transactions = db.prepare('SELECT * FROM transactions').all();
+  const balances = db.prepare('SELECT * FROM monthly_balances').all();
+
+  const backupData = {
+    exportedAt: new Date().toISOString(),
+    version: '0.02',
+    data: {
+      users,
+      categories,
+      subcategories,
+      recurring_templates: templates,
+      transactions,
+      monthly_balances: balances,
+    },
+  };
+
+  const filename = `budget_backup_${new Date().toISOString().substring(0, 10)}.json`;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(JSON.stringify(backupData, null, 2));
+});
+
+/**
+ * Téléchargement direct du fichier SQLite local (backup binaire brut)
+ */
+apiRouter.get('/backup/export/db', (_req: Request, res: Response) => {
+  // Pragma checkpoint WAL pour garantir que toutes les écritures sont consolidées
+  db.pragma('wal_checkpoint(TRUNCATE)');
+
+  const dbPath = path.resolve(process.cwd(), 'data', 'budget.sqlite');
+  if (!fs.existsSync(dbPath)) {
+    res.status(404).json({ error: 'Fichier de base de données introuvable.' });
+    return;
+  }
+
+  const filename = `budget_backup_${new Date().toISOString().substring(0, 10)}.sqlite`;
+  res.download(dbPath, filename);
 });

@@ -19,8 +19,32 @@ import { requireAuth } from '../middlewares/auth.js';
 
 export const authRouter = Router();
 
-// Cache en mémoire pour les challenges WebAuthn temporaires (clé: username ou userId)
-const currentChallenges = new Map<string, string>();
+// Persistance SQLite des challenges temporaires WebAuthn avec TTL (5 minutes)
+function saveChallenge(key: string, challenge: string): void {
+  // Nettoyer les challenges expirés (> 5 minutes)
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+  db.prepare('DELETE FROM auth_challenges WHERE created_at < ?').run(fiveMinAgo);
+
+  db.prepare(`
+    INSERT OR REPLACE INTO auth_challenges (key, challenge, created_at)
+    VALUES (?, ?, ?)
+  `).run(key, challenge, Date.now());
+}
+
+function getAndConsumeChallenge(key: string): string | null {
+  const row = db.prepare('SELECT challenge, created_at FROM auth_challenges WHERE key = ?').get(key) as { challenge: string; created_at: number } | undefined;
+  if (!row) return null;
+
+  // Supprimer après lecture (usage unique)
+  db.prepare('DELETE FROM auth_challenges WHERE key = ?').run(key);
+
+  // Vérifier TTL (5 minutes)
+  if (Date.now() - row.created_at > 5 * 60 * 1000) {
+    return null;
+  }
+
+  return row.challenge;
+}
 
 const registerStartSchema = z.object({
   username: z.string().min(2).max(50),
@@ -94,7 +118,7 @@ authRouter.post('/register/start', async (req: Request, res: Response) => {
     },
   });
 
-  currentChallenges.set(`reg_${username}`, options.challenge);
+  saveChallenge(`reg_${username}`, options.challenge);
   res.json(options);
 });
 
@@ -109,7 +133,7 @@ authRouter.post('/register/finish', async (req: Request, res: Response) => {
   }
 
   const { username, response } = parseResult.data;
-  const expectedChallenge = currentChallenges.get(`reg_${username}`);
+  const expectedChallenge = getAndConsumeChallenge(`reg_${username}`);
 
   if (!expectedChallenge) {
     res.status(400).json({ error: 'Challenge expiré ou non trouvé.' });
@@ -128,8 +152,6 @@ authRouter.post('/register/finish', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Échec de vérification WebAuthn.' });
       return;
     }
-
-    currentChallenges.delete(`reg_${username}`);
 
     const { credential } = verification.registrationInfo;
 
@@ -224,7 +246,7 @@ authRouter.post('/login/start', async (req: Request, res: Response) => {
     userVerification: 'preferred',
   });
 
-  currentChallenges.set(`auth_${username}`, options.challenge);
+  saveChallenge(`auth_${username}`, options.challenge);
   res.json(options);
 });
 
@@ -239,7 +261,7 @@ authRouter.post('/login/finish', async (req: Request, res: Response) => {
   }
 
   const { username, response } = parseResult.data;
-  const expectedChallenge = currentChallenges.get(`auth_${username}`);
+  const expectedChallenge = getAndConsumeChallenge(`auth_${username}`);
 
   if (!expectedChallenge) {
     res.status(400).json({ error: 'Challenge expiré ou non trouvé.' });
@@ -279,8 +301,6 @@ authRouter.post('/login/finish', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Échec de vérification WebAuthn.' });
       return;
     }
-
-    currentChallenges.delete(`auth_${username}`);
 
     // Mise à jour du compteur anti-rejeu / anti-clonage
     db.prepare('UPDATE passkeys SET counter = ? WHERE credential_id = ?').run(
