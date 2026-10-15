@@ -16,7 +16,7 @@
 ---
 
 ## 2. ARCHITECTURE & STACK TECHNIQUE
-* **Version du projet** : `v0.04`
+* **Version du projet** : `v0.05`
 * **Architecture** : Monorepo npm avec workspaces (`server`, `client`).
 * **Frontend** : React 19, Vite 8, TypeScript strict (`ES2022`, `bundler`), Tailwind CSS (v4 via `@tailwindcss/vite`), Zustand, TanStack Query, Recharts, Lucide React, SimpleWebAuthn Browser (`Port: 5173`, proxy configuré vers `http://localhost:3001/api`).
 * **Backend** : Node.js (v26), Express, TypeScript strict (`ES2022`, `NodeNext`), Zod, SimpleWebAuthn Server, Argon2id, JWT (vérification stricte de secret >= 32 chars au démarrage), Helmet, CORS verrouillé, Cookie-parser, Express Rate Limit (`Port: 3001`).
@@ -139,6 +139,14 @@
 ---
 
 ## 7. JOURNAL DES MODIFICATIONS (CHANGELOG D'AUDIT)
+
+### [Version 0.05] - 2026-10-15
+* **Personnalisation Avancée des Forfaits Mobiles dans l'Assistant de Première Connexion** :
+  * Dans l'étape 5 de l'Onboarding (`OnboardingWizard.tsx`), ajout d'un sélecteur de quantité dynamique (`-` / `+`) pour le nombre de forfaits mobiles du foyer (initialisé par défaut sur le nombre d'adultes).
+  * Pour chaque forfait, ajout d'un champ de saisie dédié au **Libellé personnalisable** (ex: *"Forfait Julien"*, *"Forfait Marie"*, *"Forfait Ado"*) couplé à son montant mensuel distinct.
+  * Création de transactions récurrentes distinctes avec leurs libellés respectifs rattachées à la sous-catégorie *Téléphonie & Forfaits mobiles*.
+* **Clarification Pédagogique du Report de Solde Net M-1** :
+  * Ajout d'une infobulle d'aide explicative (`ℹ️`) dans l'en-tête de mois (`MonthHeader.tsx`) détaillant l'impact du toggle (mode flux tendu indépendant vs trésorerie continue cumulée).
 
 ### [Version 0.04] - 2026-10-15
 * **Assistant de Première Connexion (Onboarding Wizard) en 6 Étapes** :

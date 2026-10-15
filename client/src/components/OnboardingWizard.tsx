@@ -47,6 +47,9 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const [paydayDefault, setPaydayDefault] = useState<number>(1);
   const [housingStatus, setHousingStatus] = useState<HousingStatus>('TENANT');
 
+  // Forfaits mobiles dynamiques
+  const [mobilePlansCount, setMobilePlansCount] = useState<number>(1);
+
   // Templates créés tout au long du wizard
   const [templates, setTemplates] = useState<TemplateDraft[]>([]);
 
@@ -260,7 +263,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setAdultsCount(Math.max(1, adultsCount - 1))}
+                    onClick={() => {
+                      const next = Math.max(1, adultsCount - 1);
+                      setAdultsCount(next);
+                      setMobilePlansCount(next);
+                    }}
                     className="h-9 w-9 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center justify-center font-bold text-base"
                   >
                     -
@@ -270,7 +277,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setAdultsCount(adultsCount + 1)}
+                    onClick={() => {
+                      const next = adultsCount + 1;
+                      setAdultsCount(next);
+                      setMobilePlansCount(next);
+                    }}
                     className="h-9 w-9 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center justify-center font-bold text-base"
                   >
                     +
@@ -910,7 +921,117 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
               </p>
             </div>
 
-            {/* Blocs thématiques */}
+            {/* 1. Bloc Télécoms avec forfaits mobiles multiples configurables */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">📶 Forfaits Mobiles & Téléphonie</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Indiquez le nombre de forfaits mobiles du foyer ({adultsCount} adulte{adultsCount > 1 ? 's' : ''}{childrenCount > 0 ? `, ${childrenCount} enfant${childrenCount > 1 ? 's' : ''}` : ''}) et personnalisez le libellé en face de chaque montant.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-slate-300 font-medium">Nombre de forfaits :</span>
+                  <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-lg p-1">
+                    <button
+                      type="button"
+                      onClick={() => setMobilePlansCount(Math.max(1, mobilePlansCount - 1))}
+                      className="h-6 w-6 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded flex items-center justify-center font-bold text-xs"
+                    >
+                      -
+                    </button>
+                    <span className="font-mono text-xs font-bold text-indigo-400 w-6 text-center">
+                      {mobilePlansCount}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMobilePlansCount(mobilePlansCount + 1)}
+                      className="h-6 w-6 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded flex items-center justify-center font-bold text-xs"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lignes dynamiques de forfaits mobiles */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {Array.from({ length: mobilePlansCount }).map((_, idx) => {
+                  const key = `mobile_plan_${idx + 1}`;
+                  const tpl = templates.find((t) => t.id === key);
+                  const isChecked = !!tpl;
+                  const catId = getCatId('RECURRING_EXPENSE', 'télécoms');
+                  const subId = getSubId(catId, 'mobile');
+
+                  return (
+                    <div
+                      key={key}
+                      className={`p-3 rounded-xl border transition-all ${
+                        isChecked
+                          ? 'bg-slate-800/80 border-indigo-500/50'
+                          : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() =>
+                              toggleTemplate(key, {
+                                category_id: catId,
+                                subcategory_id: subId,
+                                title: `Forfait Mobile ${idx + 1}`,
+                                amount: 19.99,
+                                type: 'RECURRING_EXPENSE',
+                                day_of_month: 10,
+                              })
+                            }
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800 h-4 w-4"
+                          />
+                          <span className="text-xs font-medium text-slate-200">
+                            Forfait Mobile {idx + 1}
+                          </span>
+                        </label>
+                        {isChecked && (
+                          <span className="font-mono text-xs text-rose-400 font-bold">
+                            -{tpl.amount} € / mois
+                          </span>
+                        )}
+                      </div>
+
+                      {isChecked && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-slate-800">
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5">Libellé</label>
+                            <input
+                              type="text"
+                              value={tpl.title}
+                              onChange={(e) => updateTemplateField(key, 'title', e.target.value)}
+                              placeholder={`Ex: Forfait Julien, Forfait Marie...`}
+                              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5">Montant mensuel (€)</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={tpl.amount}
+                              onChange={(e) => updateTemplateField(key, 'amount', parseFloat(e.target.value) || 0)}
+                              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-rose-400 font-bold font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Autres blocs thématiques */}
             {[
               {
                 title: '⚡ Énergie & Eau',
@@ -921,10 +1042,9 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                 ],
               },
               {
-                title: '📶 Télécoms & Numérique',
+                title: '📺 Internet & Abonnements Numériques',
                 items: [
                   { key: 'box_fibre', title: 'Box Internet / Fibre', defaultAmt: 39, catPart: 'télécoms' },
-                  { key: 'mobile', title: 'Forfait Mobile', defaultAmt: 20, catPart: 'télécoms' },
                   { key: 'streaming_video', title: 'Streaming (Netflix, Prime...)', defaultAmt: 15, catPart: 'télécoms' },
                   { key: 'streaming_music', title: 'Musique (Spotify, Deezer...)', defaultAmt: 10, catPart: 'télécoms' },
                 ],

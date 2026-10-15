@@ -46,8 +46,11 @@ export const MonthHeader: React.FC<MonthHeaderProps> = ({ netBalance }) => {
           </button>
         </div>
 
-        {/* Rollover option toggle */}
-        <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none bg-slate-800/40 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors">
+        {/* Rollover option toggle avec infobulle explicative */}
+        <label
+          title="Si activé, le reste d'argent (ou le déficit) du mois précédent est automatiquement additionné au solde de départ de ce mois. Si désactivé, chaque mois démarre avec un compteur remis à zéro."
+          className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none bg-slate-800/40 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors group"
+        >
           <input
             type="checkbox"
             checked={autoCarryOverBalance}
@@ -55,6 +58,7 @@ export const MonthHeader: React.FC<MonthHeaderProps> = ({ netBalance }) => {
             className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
           />
           <span>Reporter le solde net de M-1</span>
+          <span className="text-[10px] text-slate-500 group-hover:text-indigo-400 ml-0.5 font-bold">ℹ️</span>
         </label>
       </div>
 
