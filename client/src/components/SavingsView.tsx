@@ -123,6 +123,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
   const [selectedGoalForAlloc, setSelectedGoalForAlloc] = useState<SavingsGoal | null>(null);
   const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
+  const [adjustingGoal, setAdjustingGoal] = useState<SavingsGoal | null>(null);
+  const [adjustRealAmount, setAdjustRealAmount] = useState('');
 
   // Formulaire d'ajout / édition
   const [title, setTitle] = useState('');
@@ -234,6 +236,30 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
       showToast({ message: 'Projet d\'épargne mis à jour !', type: 'success' });
       setShowAddGoalModal(false);
       resetForm();
+    },
+  });
+
+  // Mutation Ajustement Solde Réel
+  const adjustSavingsMutation = useMutation({
+    mutationFn: async () => {
+      if (!adjustingGoal) return;
+      const parsedAmount = parseFloat(adjustRealAmount.replace(',', '.'));
+      const res = await fetch(`/api/savings/goals/${adjustingGoal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          current_amount: parsedAmount,
+        }),
+      });
+      if (!res.ok) throw new Error('Erreur ajustement épargne réelle');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['savingsGoals'] });
+      showToast({ message: `Épargne réelle mise à jour sur "${adjustingGoal?.title}" !`, type: 'success' });
+      setAdjustingGoal(null);
+      setAdjustRealAmount('');
     },
   });
 
@@ -400,9 +426,21 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
 
                 <div className="space-y-1.5">
                   <div className="flex items-baseline justify-between font-mono text-xs">
-                    <span className="text-base font-bold text-slate-100">
-                      {goal.current_amount.toFixed(2)} €
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base font-bold text-slate-100">
+                        {goal.current_amount.toFixed(2)} €
+                      </span>
+                      <button
+                        onClick={() => {
+                          setAdjustingGoal(goal);
+                          setAdjustRealAmount(String(goal.current_amount));
+                        }}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-sans border border-slate-700/80 transition"
+                        title="Ajuster le solde réel constaté"
+                      >
+                        Ajuster réel
+                      </button>
+                    </div>
                     <span className="text-slate-400">
                       sur {goal.target_amount.toFixed(2)} € ({pct}%)
                     </span>
@@ -423,15 +461,17 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                 {goal.target_date && !isCompleted && (
                   <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] space-y-1.5">
                     <div className="flex items-center justify-between text-slate-300">
-                      <span className="text-slate-400">À épargner par mois :</span>
+                      <span className="text-slate-400">Reste à épargner / mois :</span>
                       <span className="font-mono font-bold text-emerald-400 text-xs">
                         {schedule.monthlyDepositNeeded.toFixed(2)} € / mois
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                      <span>Durée restante :</span>
-                      <span className="font-mono text-slate-300">{schedule.monthsRemaining} mois</span>
+                      <span>Reste à charge total :</span>
+                      <span className="font-mono text-slate-200 font-semibold">
+                        {Math.max(0, goal.target_amount - goal.current_amount).toFixed(2)} € sur {schedule.monthsRemaining} mois
+                      </span>
                     </div>
 
                     {goal.interest_rate !== undefined && goal.interest_rate !== null && goal.interest_rate > 0 && (
@@ -439,7 +479,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                         <div className="flex items-center justify-between text-emerald-400 font-medium">
                           <span className="flex items-center gap-1">
                             <TrendingUp className="w-3 h-3" />
-                            <span>Intérêts cumulés estimés :</span>
+                            <span>Intérêts cumulés (recalculés sur le réel) :</span>
                           </span>
                           <span className="font-mono font-bold">
                             +{schedule.estimatedInterests.toFixed(2)} €
@@ -700,6 +740,90 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-sm disabled:opacity-50"
               >
                 {allocateMutation.isPending ? 'Versement...' : 'Confirmer le versement'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ajustement Solde Réel Constaté */}
+      {adjustingGoal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <PiggyBank className="w-4 h-4 text-emerald-400" />
+              <span>Ajuster l'épargne réelle sur "{adjustingGoal.title}"</span>
+            </h3>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Indiquez le montant réellement présent sur votre livret/compte. L'effort d'épargne mensuel restant et les intérêts prévisionnels seront immédiatement recalculés.
+            </p>
+
+            <div className="space-y-2 text-xs">
+              <label className="block text-[11px] text-slate-400">Montant réel constaté (€)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                autoFocus
+                placeholder="Ex: 1150"
+                value={adjustRealAmount}
+                onChange={(e) => setAdjustRealAmount(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            {/* Simulation en direct du nouvel effort mensuel nécessaire */}
+            {(() => {
+              const newAmount = parseFloat(adjustRealAmount.replace(',', '.'));
+              if (!isNaN(newAmount) && adjustingGoal.target_date) {
+                const newSchedule = calculateSavingsSchedule(
+                  newAmount,
+                  adjustingGoal.target_amount,
+                  adjustingGoal.interest_rate,
+                  currentMonthYear,
+                  adjustingGoal.target_date
+                );
+                return (
+                  <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] space-y-1 text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Nouveau reste à épargner :</span>
+                      <span className="font-mono font-bold text-emerald-400 text-xs">
+                        {newSchedule.monthlyDepositNeeded.toFixed(2)} € / mois
+                      </span>
+                    </div>
+                    {adjustingGoal.interest_rate && adjustingGoal.interest_rate > 0 && (
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span>Intérêts recalculés :</span>
+                        <span className="font-mono text-emerald-400 font-semibold">
+                          +{newSchedule.estimatedInterests.toFixed(2)} €
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustingGoal(null);
+                  setAdjustRealAmount('');
+                }}
+                className="px-3 py-1.5 text-slate-400 hover:text-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!adjustRealAmount || parseFloat(adjustRealAmount) < 0 || adjustSavingsMutation.isPending}
+                onClick={() => adjustSavingsMutation.mutate()}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-sm disabled:opacity-50"
+              >
+                {adjustSavingsMutation.isPending ? 'Mise à jour...' : 'Enregistrer le solde réel'}
               </button>
             </div>
           </div>
