@@ -20,14 +20,46 @@ export type OperationType =
   | 'CURRENT_EXPENSE'
   | 'UNFORESEEN_EXPENSE';
 
+export interface RefreshToken {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: number;
+  revoked: number;
+  created_at?: string;
+}
+
 export interface Category {
   id: string;
   name: string;
   type: OperationType;
-  icon: string; // Lucide icon name
-  color: string; // Hex color or Tailwind color class
-  is_system: number; // 1 = pre-créée, 0 = personnalisée
+  icon: string; // Nom de l'icône Lucide
+  color: string; // Code Hex ou classe Tailwind
+  is_system: number; // 1 = pré-créée, 0 = personnalisée
   is_active: number;
+  user_id?: string;
+  budget_limit?: number | null;
+}
+
+export interface SavingsGoal {
+  id: string;
+  user_id?: string;
+  title: string;
+  target_amount: number;
+  current_amount: number;
+  target_date?: string | null;
+  icon?: string;
+  color?: string;
+  created_at?: string;
+}
+
+export interface SavingsAllocation {
+  id: string;
+  goal_id: string;
+  month_year: string;
+  amount: number;
+  date: string;
+  created_at?: string;
 }
 
 export interface Subcategory {
@@ -53,6 +85,7 @@ export type RecurringTemplateStatus = 'ACTIVE' | 'PENDING_PAUSED';
 
 export interface RecurringTemplate {
   id: string;
+  user_id?: string;
   title: string;
   amount: number;
   type: 'INCOME' | 'RECURRING_EXPENSE' | 'CURRENT_EXPENSE';
@@ -69,6 +102,7 @@ export type TransactionStatus = 'ACTIVE' | 'PENDING';
 
 export interface Transaction {
   id: string;
+  user_id?: string;
   template_id?: string | null; // NULL si imprévue ou ponctuelle
   month_year: string; // Format 'YYYY-MM'
   date: string; // Format 'YYYY-MM-DD'
@@ -87,6 +121,7 @@ export interface MonthlyBalance {
   month_year: string; // 'YYYY-MM'
   carried_over_from_previous: number;
   is_closed: number;
+  user_id?: string;
 }
 
 export const DDL_SCHEMA = `
@@ -114,6 +149,16 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
   created_at INTEGER NOT NULL -- timestamp ms
 );
 
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Profil du foyer et état d'onboarding (Singleton id=1)
 CREATE TABLE IF NOT EXISTS household_profile (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -134,7 +179,8 @@ CREATE TABLE IF NOT EXISTS categories (
   icon TEXT NOT NULL, -- Nom de l'icône Lucide
   color TEXT NOT NULL, -- Code Hex ou classe Tailwind
   is_system INTEGER DEFAULT 0, -- 1 = pré-créée, 0 = personnalisée
-  is_active INTEGER DEFAULT 1
+  is_active INTEGER DEFAULT 1,
+  budget_limit REAL DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS subcategories (
@@ -142,6 +188,30 @@ CREATE TABLE IF NOT EXISTS subcategories (
   category_id TEXT NOT NULL,
   name TEXT NOT NULL,
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+);
+
+-- Objectifs d'épargne et allocations (F2)
+CREATE TABLE IF NOT EXISTS savings_goals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT DEFAULT 'default_user',
+  title TEXT NOT NULL,
+  target_amount REAL NOT NULL,
+  current_amount REAL NOT NULL DEFAULT 0.0,
+  target_date TEXT,
+  icon TEXT DEFAULT 'PiggyBank',
+  color TEXT DEFAULT '#10B981',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS savings_allocations (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL,
+  month_year TEXT NOT NULL,
+  amount REAL NOT NULL,
+  date TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (goal_id) REFERENCES savings_goals(id) ON DELETE CASCADE
 );
 
 -- 3. Modèles d'opérations récurrentes (Moteur de répétition)
@@ -201,4 +271,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date
 
 CREATE INDEX IF NOT EXISTS idx_subcategories_category_id 
   ON subcategories(category_id);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_template_id 
+  ON transactions(template_id);
 `;

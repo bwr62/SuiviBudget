@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   FolderTree,
   BarChart3,
+  PiggyBank,
   LogOut,
   Wallet,
   Sun,
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'recurring', label: 'Charges & Abonnements', icon: CalendarSync },
   { id: 'current', label: 'Dépenses courantes', icon: Receipt },
   { id: 'unforeseen', label: 'Dépenses imprévues', icon: AlertTriangle },
+  { id: 'savings', label: 'Projets & Épargne', icon: PiggyBank },
   { id: 'categories', label: 'Gestion & Catégories', icon: FolderTree },
   { id: 'analytics', label: 'Statistiques & Analyses', icon: BarChart3 },
 ];

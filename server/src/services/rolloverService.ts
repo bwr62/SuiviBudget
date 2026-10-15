@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import crypto from 'crypto';
 import { db } from '../db/index.js';
 
 export interface MonthlySummary {

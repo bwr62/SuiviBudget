@@ -147,12 +147,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, hasExistingUser
             {generatedRecoveryCode
               ? 'Conservez votre code de secours'
               : isRegistering
-              ? 'Configuration du compte sécurisé'
-              : 'Authentification Passwordless'}
+                ? 'Configuration du compte sécurisé'
+                : 'Authentification sécurisée'}
           </h2>
           <p className="text-xs text-slate-400">
             {generatedRecoveryCode
-              ? 'Ce code maître ne sera affiché qu\'une seule fois. Notez-le soigneusement.'
+              ? 'Ce code maître ne sera affiché qu\'UNE seule fois. Notez-le soigneusement.'
               : 'Protection FIDO2 / Passkey biométrique & Chiffrement local'}
           </p>
         </div>
@@ -250,8 +250,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, hasExistingUser
                 {loading
                   ? 'Communication biométrique...'
                   : isRegistering
-                  ? 'Créer ma clé Passkey (WebAuthn)'
-                  : 'Connexion par Passkey'}
+                    ? 'Créer ma clé Passkey (WebAuthn)'
+                    : 'Connexion par Passkey'}
               </span>
             </button>
 

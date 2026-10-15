@@ -13,6 +13,8 @@ dist/
 server/data/*.sqlite
 server/data/*.sqlite-wal
 server/data/*.sqlite-shm
+server/data/backups/
+server/data/
 
 # Environment & local files
 .env

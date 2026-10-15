@@ -11,6 +11,7 @@
     "dev:client": "npm --workspace=client run dev",
     "build:server": "npm --workspace=server run build",
     "build:client": "npm --workspace=client run build",
-    "seed": "npm --workspace=server run seed"
+    "seed": "npm --workspace=server run seed",
+    "test": "npm --workspace=server run test"
   }
 }

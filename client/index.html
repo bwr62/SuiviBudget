@@ -3,8 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0284c7" />
+    <meta name="description" content="Application souveraine de suivi budgétaire personnel" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>client</title>
+    <title>Suivi Budget</title>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('app_theme');
+          var theme = saved === 'light' ? 'theme-light' : 'theme-dark';
+          document.documentElement.classList.add(theme);
+          if (document.body) {
+            document.body.classList.add(theme);
+          } else {
+            document.addEventListener('DOMContentLoaded', function() {
+              document.body.classList.add(theme);
+            });
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

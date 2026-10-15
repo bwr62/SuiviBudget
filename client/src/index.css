@@ -5,75 +5,96 @@
     @apply antialiased font-sans min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200 transition-colors duration-200;
   }
 
+  :root {
+    --app-bg: #020617;
+    --app-text: #f8fafc;
+    --app-subtext: #94a3b8;
+  }
+
   /* Thème sombre par défaut */
+  html.theme-dark,
   body.theme-dark {
     color-scheme: dark;
+    --app-bg: #020617;
+    --app-text: #f8fafc;
+    --app-subtext: #94a3b8;
     @apply bg-slate-950 text-slate-100;
   }
 
-  /* Thème clair élégant inspiré des applications financières modernes */
+  /* Thème clair élégant rafraîchi : tons bleu / vert clair pastel lumineux */
+  html.theme-light,
   body.theme-light {
     color-scheme: light;
-    @apply bg-slate-50 text-slate-900;
+    --app-bg: #f0f7fa;
+    --app-text: #0c2b3a;
+    --app-subtext: #3b6579;
+    background-color: #f0f7fa !important;
+    color: #0c2b3a !important;
   }
 
-  /* Adaptation fine des composants en mode clair */
+  /* Adaptation fine des composants en mode clair (Nuances bleu-vert d'eau clair) */
   body.theme-light .bg-slate-900 {
     background-color: #ffffff !important;
-    border-color: #e2e8f0 !important;
+    border-color: #cfe2ed !important;
   }
 
   body.theme-light .bg-slate-950 {
-    background-color: #f8fafc !important;
+    background-color: #e6f2f7 !important;
+  }
+
+  body.theme-light .bg-slate-900\/50 {
+    background-color: rgba(240, 247, 250, 0.85) !important;
   }
 
   body.theme-light .bg-slate-800\/40,
   body.theme-light .bg-slate-800\/60,
   body.theme-light .bg-slate-800\/80 {
-    background-color: #f1f5f9 !important;
-    border-color: #e2e8f0 !important;
+    background-color: #e5f1f7 !important;
+    border-color: #cfe2ed !important;
   }
 
   body.theme-light .bg-slate-800 {
-    background-color: #f1f5f9 !important;
-    color: #0f172a !important;
-    border-color: #cbd5e1 !important;
+    background-color: #e1eff6 !important;
+    color: #0c2b3a !important;
+    border-color: #b9dbe8 !important;
   }
 
   body.theme-light .text-slate-100,
   body.theme-light .text-slate-200 {
-    color: #0f172a !important;
+    color: #0c2b3a !important;
   }
 
   body.theme-light .text-slate-300,
   body.theme-light .text-slate-400 {
-    color: #475569 !important;
+    color: #33596e !important;
   }
 
   body.theme-light .text-slate-500 {
-    color: #64748b !important;
+    color: #557b90 !important;
   }
 
   body.theme-light .border-slate-800,
   body.theme-light .border-slate-800\/80,
   body.theme-light .border-slate-800\/60 {
-    border-color: #e2e8f0 !important;
+    border-color: #cfe2ed !important;
   }
 
-  body.theme-light .border-slate-700 {
-    border-color: #cbd5e1 !important;
+  body.theme-light .border-slate-700,
+  body.theme-light .border-slate-700\/80,
+  body.theme-light .border-slate-700\/60 {
+    border-color: #b9dbe8 !important;
   }
 
   body.theme-light input,
   body.theme-light select,
   body.theme-light textarea {
     background-color: #ffffff !important;
-    color: #0f172a !important;
-    border-color: #cbd5e1 !important;
+    color: #0c2b3a !important;
+    border-color: #b9dbe8 !important;
   }
 
   body.theme-light .shadow-sm,
   body.theme-light .shadow-md {
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+    box-shadow: 0 1px 3px 0 rgba(12, 43, 58, 0.05), 0 1px 2px -1px rgba(12, 43, 58, 0.04) !important;
   }
 }

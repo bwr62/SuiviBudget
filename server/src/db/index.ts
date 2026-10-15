@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { DDL_SCHEMA } from './schema.js';
+import { runMigrations } from './migrator.js';
 
 const DB_DIR = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DB_DIR)) {
@@ -23,12 +24,8 @@ db.pragma('synchronous = NORMAL');
 export function initDatabase(): void {
   db.exec(DDL_SCHEMA);
 
-  // Migration idempotente: s'assurer de la présence de la colonne end_month_year
-  const tableInfo = db.prepare("PRAGMA table_info(recurring_templates)").all() as Array<{ name: string }>;
-  const hasEndMonthYear = tableInfo.some((col) => col.name === 'end_month_year');
-  if (!hasEndMonthYear) {
-    db.exec("ALTER TABLE recurring_templates ADD COLUMN end_month_year TEXT;");
-  }
+  // Exécution du gestionnaire de migrations versionnées (C1)
+  runMigrations(db);
 
   // Initialisation du singleton household_profile s'il n'existe pas
   const profile = db.prepare("SELECT id FROM household_profile WHERE id = 1").get();

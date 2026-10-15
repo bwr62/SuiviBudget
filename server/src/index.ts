@@ -12,6 +12,18 @@ const app = express();
 // 1. Protection HTTP & Sécurité applicative
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'", env.CLIENT_ORIGIN, 'http://localhost:5173', 'http://localhost:3001'],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: null,
+    },
+  },
 }));
 
 app.use(cors({
@@ -20,7 +32,7 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // 2. Limitation du taux de requêtes (Anti Brute-Force) sur l'authentification
 const authLimiter = rateLimit({
@@ -33,7 +45,7 @@ const authLimiter = rateLimit({
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
-    version: '0.01',
+    version: '0.07',
     serverTime: new Date().toISOString(),
   });
 });

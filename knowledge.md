@@ -1,6 +1,6 @@
 # 🧠 KNOWLEDGE BASE - APPLICATION DE GESTION DE BUDGET (PC)
 
-> **AVERTISSEMENT POUR L'AGENT IA** : Ce fichier est la source de vérité architecturale du projet. Tu DOIS le mettre à jour en temps réel à chaque création ou modification de fichier. Ne supprime jamais l'historique du Changelog.
+> **AVERTISSEMENT** : Ce fichier est la source de vérité architecturale du projet. Tu DOIS le mettre à jour en temps réel à chaque création ou modification de fichier. Ne supprime jamais l'historique du Changelog.
 
 ---
 
@@ -11,16 +11,19 @@
 - [x] **Étape 4** : API REST & Moteur de Report Mensuel (`Rollover Engine`) avec ACID et exclusion stricte `PENDING`
 - [x] **Étape 5** : Frontend - Layout Desktop (1280px-2560px), Sidebar 7 onglets, Switch rapide & Tableaux dynamiques
 - [x] **Étape 6** : Frontend - CRUD Catégories (édition, ajout de sous-catégories) & Statistiques visuelles (`Recharts`)
-- [x] **Étape 7** : Audit final, suite de tests d'intégration (idempotence, report automatique M à M+1 & exclusion `PENDING`) & Versioning
+- [x] **Étape 7** : Assistant d'onboarding complet en 6 étapes & propagation temporelle avec intégrité historique
+- [x] **Étape 8** : Audit complet v1 (résolution C1, C2, H1-H5, N1-N8, E1-E6)
+- [x] **Étape 9** : Audit v2 100% résolu (Toasts Undo, Tri interactif, Poches d'épargne, Plafonds budgétaires, Import/Export CSV, Sécurité 10Mo & RateLimit 5/h, PWA, Vendor Chunks, Snapshot BDD clôture).
 
 ---
 
 ## 2. ARCHITECTURE & STACK TECHNIQUE
-* **Version du projet** : `v0.05`
+* **Version du projet** : `v0.07`
 * **Architecture** : Monorepo npm avec workspaces (`server`, `client`).
-* **Frontend** : React 19, Vite 8, TypeScript strict (`ES2022`, `bundler`), Tailwind CSS (v4 via `@tailwindcss/vite`), Zustand, TanStack Query, Recharts, Lucide React, SimpleWebAuthn Browser (`Port: 5173`, proxy configuré vers `http://localhost:3001/api`).
-* **Backend** : Node.js (v26), Express, TypeScript strict (`ES2022`, `NodeNext`), Zod, SimpleWebAuthn Server, Argon2id, JWT (vérification stricte de secret >= 32 chars au démarrage), Helmet, CORS verrouillé, Cookie-parser, Express Rate Limit (`Port: 3001`).
-* **Base de données** : SQLite locale via `better-sqlite3` (`server/data/budget.sqlite`) en mode `WAL` (Write-Ahead Logging) avec `foreign_keys = ON` et `synchronous = NORMAL`.
+* **Frontend** : React 19, Vite 8, TypeScript strict (`ES2022`, `bundler`), Tailwind CSS (v4 via `@tailwindcss/vite`), Zustand (`useUIStore`, `useToastStore`), TanStack Query v5 (requêtes et mutations réactives avec invalidations ciblées, migration AnalyticsView complète), Recharts, Lucide React, SimpleWebAuthn Browser, PWA (`manifest.json` installable sur Desktop/Mobile, Rollup `manualChunks` vendor splitting).
+* **Backend** : Node.js (v26), Express, TypeScript strict (`ES2022`, `NodeNext`), architecture modulaire en 7 sous-routeurs Express (`months`, `transactions`, `categories`, `stats`, `backup`, `onboarding`, `savings`), gestionnaire d'erreurs centralisé `errorHandler`, Zod, SimpleWebAuthn Server, Argon2id, JWT (Access Token 15 min + Refresh Token 7 jours avec rotation et stockage SQLite), Helmet avec CSP durci, CORS verrouillé, Cookie-parser, Express Rate Limit (limiteur général 100/15min + limiteur strict `recoveryLimiter` 5/heure sur le code de secours), `express.json({ limit: '10mb' })` pour les imports massifs, snapshot automatique de la base SQLite à la clôture de mois dans `server/data/backups/`.
+* **Base de données** : SQLite locale via `better-sqlite3` (`server/data/budget.sqlite`) en mode `WAL` avec `foreign_keys = ON`, `synchronous = NORMAL`, et système de migrations versionnées (`schema_versions`, migrations 1 à 7 : migration 6 plafonds budgétaires, migration 7 poches d'épargne et allocations).
+* **Tests** : Suite de tests automatisée native Node.js (`node:test` + `node:assert/strict` via `tsx --test`) couvrant 9 scénarios (idempotence, calcul de dates, exclusion PENDING, portée temporelle, report M-1, plafonds de catégories, allocations d'épargne).
 
 ---
 
@@ -28,34 +31,61 @@
 
 | Chemin du Fichier | Rôle & Responsabilité | Exports Principaux (Fonctions / Composants) | Dépendances Internes | Statut |
 | :--- | :--- | :--- | :--- | :--- |
-| `package.json` | Racine du monorepo npm | Scripts `dev:server`, `dev:client`, `build:server`, `build:client`, `seed` | - | Actif |
+| `package.json` | Racine du monorepo npm | Scripts `dev:*`, `build:*`, `seed`, `test` | - | Actif |
 | `SPECIFICATIONS.md` | Cahier des charges technique et fonctionnel | - | - | Actif |
 | `knowledge.md` | Base documentaire vivante du projet | - | - | Actif |
+| `audit151026.md` | Rapport d'audit complet v1 (100% résolu) | - | - | Actif |
+| `audit151026v2.md` | Rapport d'audit v2 & suggestions d'améliorations (UX, Sécurité, Métier) | - | - | Actif |
 | `.gitignore` | Exclusion de node_modules, dist et bases sqlite | - | - | Actif |
 | `RolloverService.ts` | Prototype initial de référence | `RolloverEngine`, `MonthlySummary` | - | Archivé |
-| `server/package.json` | Dépendances et scripts du backend Node.js | Scripts `dev`, `build`, `seed` | - | Actif |
+| `server/package.json` | Dépendances et scripts du backend Node.js | Scripts `dev`, `build`, `seed`, `test` | - | Actif |
 | `server/tsconfig.json` | Configuration TypeScript stricte du backend | Options `NodeNext`, `strict: true` | - | Actif |
 | `server/.env` | Variables d'environnement locales (secret JWT > 32 chars) | Variables d'environnement | - | Actif |
 | `server/src/config/env.ts` | Validateur de configuration et de sécurité JWT | `env` | - | Actif |
-| `server/src/middlewares/auth.ts` | Middleware d'authentification cookie HttpOnly / Bearer | `requireAuth`, interface `AuthUserPayload` | `server/src/config/env.ts` | Actif |
+| `server/src/middlewares/auth.ts` | Middleware auth JWT avec auto-refresh token (15m / 7j) | `requireAuth`, `issueAuthTokens`, `revokeUserRefreshTokens` | `server/src/config/env.ts`, `server/src/db/index.ts` | Actif |
+| `server/src/middlewares/errorHandler.ts` | Gestionnaire d'erreurs centralisé Express (H1) | `errorHandler` | - | Actif |
+| `server/src/utils/dbHelpers.ts` | Helpers génériques BDD (buildDynamicUpdate DRY, roundCurrency E5) | `buildDynamicUpdate`, `roundCurrency` | - | Actif |
 | `server/src/db/schema.ts` | Schéma DDL SQL et types TypeScript stricts des entités | `DDL_SCHEMA`, interfaces entités | - | Actif |
-| `server/src/db/index.ts` | Instance SQLite `better-sqlite3` (WAL, FK ON) & init | `db`, `initDatabase` | `server/src/db/schema.ts` | Actif |
+| `server/src/db/migrator.ts` | Moteur de migrations SQLite versionnées (1 à 5) (C1) | `runMigrations`, `migrations` | `server/src/db/schema.ts` | Actif |
+| `server/src/db/index.ts` | Instance SQLite `better-sqlite3` (WAL, FK ON) & migrations auto | `db`, `initDatabase` | `server/src/db/migrator.ts` | Actif |
 | `server/src/db/seed.ts` | Script d'amorçage des 20 catégories et 83 sous-catégories | `SEED_CATEGORIES`, `seedCategories` | `server/src/db/index.ts` | Actif |
-| `server/src/db/verifyTest.ts` | Suite de tests automatisés (Rollover, Idempotence, PENDING) | Script de validation | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
-| `server/src/db/verifyMonthRoll.ts` | Test de report automatique multi-mois (Septembre -> Octobre) | Script de validation | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
-| `server/src/services/rolloverService.ts` | Moteur de report mensuel, transactions ACID & calculs PENDING | `RolloverEngine`, `rolloverService`, `MonthlySummary` | `server/src/db/index.ts` | Actif |
-| `server/src/routes/auth.ts` | Routes WebAuthn FIDO2 / Passkeys et secours Argon2id | `authRouter` | `server/src/db/index.ts`, `server/src/config/env.ts` | Actif |
-| `server/src/routes/api.ts` | Routes REST CRUD transactions, templates, catégories & sous-catégories | `apiRouter` | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
+| `server/src/services/rolloverService.ts` | Moteur de report mensuel ACID, calculs PENDING, portée temporelle | `RolloverEngine`, `rolloverService`, `MonthlySummary` | `server/src/db/index.ts` | Actif |
+| `server/src/tests/rollover.test.ts` | Suite de tests automatisés native Node.js (E2) | 7 tests (Idempotence, PENDING, Scope, M-1) | `server/src/services/rolloverService.ts` | Actif |
+| `server/src/routes/auth.ts` | Routes WebAuthn FIDO2 / Passkeys, Refresh Tokens, secours Argon2id | `authRouter` | `server/src/db/index.ts`, `server/src/config/env.ts` | Actif |
+| `server/src/routes/months.ts` | Routes gestion des mois, clôture N4, courbe journalière N5 | `monthsRouter` | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
+| `server/src/routes/transactions.ts` | Routes CRUD transactions et récurrences avec portée temporelle | `transactionsRouter` | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
+| `server/src/routes/categories.ts` | Routes CRUD catégories et sous-catégories | `categoriesRouter` | `server/src/db/index.ts` | Actif |
+| `server/src/routes/stats.ts` | Routes statistiques annuelles, répartition et Top 5 N6 | `statsRouter` | `server/src/db/index.ts` | Actif |
+| `server/src/routes/backup.ts` | Routes exports JSON/DB et import atomique JSON C2 | `backupRouter`, `autoBackupOnClose` | `server/src/db/index.ts` | Actif |
+| `server/src/routes/onboarding.ts` | Routes profil foyer et finalisation wizard onboarding | `onboardingRouter` | `server/src/db/index.ts` | Actif |
+| `server/src/routes/savings.ts` | Routes CRUD objectifs et allocations de tirelires (F2) | `savingsRouter` | `server/src/db/index.ts` | Actif |
+| `server/src/routes/api.ts` | Routeur racine montant les 7 sous-routeurs thématiques (H1, F2) | `apiRouter` | 7 sous-routeurs + `errorHandler` | Actif |
+| `client/public/manifest.json` | Web App Manifest pour installation PWA Desktop/Mobile (P1) | Manifest PWA | - | Actif |
+| `client/src/store/useToastStore.ts` | Store Zustand de notifications Toast légères avec Undo 5s (U1) | `useToastStore`, `showToast` | - | Actif |
+| `client/src/components/ui/Toast.tsx` | Conteneur d'affichage des Toasts réactifs avec bouton Annuler (U1) | `ToastContainer` | `useToastStore` | Actif |
+| `client/src/components/SavingsView.tsx` | Vue dédiée aux projets et poches d'épargne avec tirelires (F2) | `SavingsView` | `savingsGoals`, `savingsAllocations` | Actif |
+| `client/src/components/BankImportModal.tsx` | Assistant modal d'import relevé bancaire CSV avec auto-catégorisation (F3) | `BankImportModal` | `categories` | Actif |
 | `server/src/index.ts` | Serveur Express, Helmet, CORS, Rate-limiting | Point d'entrée serveur Express | Routes auth & API | Actif |
 | `client/package.json` | Dépendances et scripts du frontend React/Vite | Scripts `dev`, `build`, `lint` | - | Actif |
 | `client/tsconfig.app.json` | Configuration stricte TypeScript de l'application client | Options TypeScript `strict: true` | - | Actif |
 | `client/vite.config.ts` | Configuration Vite avec Tailwind CSS et proxy API 3001 | Configuration Vite | - | Actif |
-| `client/src/index.css` | Styles de base Tailwind CSS et dark theme par défaut | Directive `@import "tailwindcss";` | - | Actif |
+| `client/index.html` | Point d'entrée HTML avec script bloquant anti-FOUC (E6) | Script synchrone thème | - | Actif |
+| `client/src/index.css` | Styles Tailwind CSS, variables CSS & thème clair pastel bleu/vert | Directive `@import "tailwindcss";` | - | Actif |
 | `client/src/types/index.ts` | Interfaces et types TypeScript partagés côté client | Types entités financières | - | Actif |
-| `client/src/store/useUIStore.ts` | Store Zustand pour navigation d'onglets et mois | `useUIStore`, type `TabType` | - | Actif |
-| `client/src/components/Sidebar.tsx` | Barre de navigation latérale 7 onglets (260px) | `Sidebar` | `client/src/store/useUIStore.ts` | Actif |
-| `client/src/components/MonthHeader.tsx` | En-tête de sélection de mois et toggle de report M-1 | `MonthHeader` | `client/src/store/useUIStore.ts` | Actif |
-| `client/src/components/DashboardView.tsx` | Tableau de bord avec 4 KPIs et jauge budgétaire | `DashboardView` | `client/src/types/index.ts` | Actif |
+| `client/src/store/useUIStore.ts` | Store Zustand pour navigation d'onglets, mois et thème | `useUIStore`, type `TabType` | - | Actif |
+| `client/src/components/Sidebar.tsx` | Barre de navigation latérale 7 onglets (260px) + thème switcher | `Sidebar` | `client/src/store/useUIStore.ts` | Actif |
+| `client/src/components/MonthHeader.tsx` | En-tête mois, clôture de mois (N4) et toggle report M-1 | `MonthHeader` | `client/src/store/useUIStore.ts` | Actif |
+| `client/src/components/DashboardView.tsx` | Tableau de bord : KPIs, jauge, Top 5 (N6) et Capacité d'épargne | `DashboardView` | `client/src/types/index.ts` | Actif |
+| `client/src/components/TransactionsTableView.tsx` | Orchestrateur tableau transactions (recherche, raccourci 'N') | `TransactionsTableView` | `transactions/*`, `ToggleScopeModal` | Actif |
+| `client/src/components/transactions/SearchBar.tsx` | Composant barre de recherche filtrant instantanément (N1) | `SearchBar` | - | Actif |
+| `client/src/components/transactions/AddTransactionForm.tsx` | Formulaire d'ajout rapide dépliable avec auto-focus (N1) | `AddTransactionForm` | - | Actif |
+| `client/src/components/transactions/TransactionRow.tsx` | Ligne de transaction avec badges, toggle statut et suppression (N1) | `TransactionRow` | - | Actif |
+| `client/src/components/CategoriesView.tsx` | Vue catégories avec import/export JSON (C2) et cartes modulaires | `CategoriesView` | `categories/*` | Actif |
+| `client/src/components/categories/CategoryCard.tsx` | Carte individuelle de catégorie avec édition et sous-catégories (N2) | `CategoryCard` | `SubcategoryEditor` | Actif |
+| `client/src/components/categories/SubcategoryEditor.tsx` | Éditeur inline pour ajout/renommage/suppression de sous-catégories (N2) | `SubcategoryEditor` | - | Actif |
+| `client/src/components/categories/NewCategoryModal.tsx` | Modale accessible d'ajout de nouvelle catégorie avec palette (N2) | `NewCategoryModal` | - | Actif |
+| `client/src/components/UpdateScopeModal.tsx` | Modale accessible de choix de portée lors de l'édition d'une récurrence | `UpdateScopeModal` | - | Actif |
+| `client/src/components/ToggleScopeModal.tsx` | Modale accessible de choix de mise en attente (Mois seul vs Futurs) | `ToggleScopeModal` | - | Actif |
 | `client/src/components/OnboardingWizard.tsx` | Assistant d'onboarding découpé et orchestrateur modulaire | `OnboardingWizard` | `client/src/components/onboarding/*` | Actif |
 | `client/src/components/onboarding/types.ts` | Types TypeScript stricts des étapes de l'onboarding | `TemplateDraft`, `StepProps` | `client/src/types` | Actif |
 | `client/src/components/onboarding/Step1Household.tsx` | Étape 1 : Composition du foyer (adultes, enfants, animaux, paie) | `Step1Household` | `client/src/components/onboarding/types.ts` | Actif |
@@ -64,46 +94,51 @@
 | `client/src/components/onboarding/Step4Loans.tsx` | Étape 4 : Autres crédits & extinction automatique | `Step4Loans` | `client/src/components/onboarding/types.ts` | Actif |
 | `client/src/components/onboarding/Step5RecurringExpenses.tsx` | Étape 5 : Charges fixes & forfaits mobiles personnalisables | `Step5RecurringExpenses` | `client/src/components/onboarding/types.ts` | Actif |
 | `client/src/components/onboarding/Step6Summary.tsx` | Étape 6 : Synthèse financière en direct et validation | `Step6Summary` | `client/src/components/onboarding/types.ts` | Actif |
-| `client/src/components/UpdateScopeModal.tsx` | Boîte de dialogue de choix de portée temporelle (Mois courant vs Mois courant + Futurs) | `UpdateScopeModal` | - | Actif |
-| `server/src/db/verifyPropagation.ts` | Test automatisé de propagation temporelle et d'extinction de prêt | Script de validation | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
-| `client/src/components/CategoriesView.tsx` | Gestion complète : modification catégorie/sous-catégorie & ajout | `CategoriesView` | `client/src/types/index.ts` | Actif |
-| `client/src/components/AnalyticsView.tsx` | Graphiques Recharts annuels et répartition catégories | `AnalyticsView` | `client/src/types/index.ts` | Actif |
+| `client/src/components/AnalyticsView.tsx` | Graphiques Recharts : Courbe trésorerie AreaChart (N5), répartition | `AnalyticsView` | `client/src/types/index.ts` | Actif |
 | `client/src/components/AuthModal.tsx` | Modal WebAuthn Passkeys et déverrouillage de secours | `AuthModal` | `@simplewebauthn/browser` | Actif |
-| `client/src/App.tsx` | Composant racine assemblant layout, stores et synchronisation mois | `App` | Tous les composants client | Actif |
-| `client/src/main.tsx` | Point d'entrée de l'application React | Root render | `client/src/App.tsx` | Actif |
+| `client/src/App.tsx` | Composant racine migré vers TanStack Query v5 (useQuery/useMutation) | `App` | Tous les composants client | Actif |
+| `client/src/main.tsx` | Point d'entrée React avec QueryClientProvider configuré | Root render | `client/src/App.tsx` | Actif |
 
 ---
 
 ## 4. SCHÉMA SQLite & INDEX ACTIFS
 
 * **Tables actives** :
+  * `schema_versions` : Suivi des migrations de schéma versionnées (1 à 5).
   * `users` : Comptes utilisateurs (`id`, `username`, `recovery_hash`, `created_at`).
   * `passkeys` : Clés publiques WebAuthn (`credential_id`, `user_id`, `public_key`, `counter`, `transports`).
   * `auth_challenges` : Stockage SQLite temporaire des challenges FIDO2 avec TTL de 5 minutes.
-  * `household_profile` : Profil singleton (`id = 1`) stockant la composition du foyer (`adults_count`, `children_count`, `pets_count`), le statut de logement (`housing_status`), le jour de paie par défaut (`payday_default`) et l'indicateur `has_completed_onboarding`.
-  * `categories` : Catégories système et personnalisées (`id`, `name`, `type`, `icon`, `color`, `is_system`, `is_active`).
+  * `refresh_tokens` : Tokens de rafraîchissement chiffrés avec expiration et révocation (E3).
+  * `household_profile` : Profil singleton (`id = 1`) composition du foyer et jour de paie.
+  * `categories` : Catégories système et personnalisées (`user_id`, `id`, `name`, `type`, `icon`, `color`, `is_system`, `is_active`).
   * `subcategories` : Sous-catégories avec cascade FK.
-  * `recurring_templates` : Modèles d'opérations récurrentes (`carry_over`, `day_of_month`, `status`, et `end_month_year` pour extinction programmée).
-  * `transactions` : Instances réelles mensuelles (`status` ACTIVE / PENDING, `is_carried_over`, `month_year` dérivé de `date`).
-  * `monthly_balances` : Reliquat et clôtures mensuelles (`carried_over_from_previous`).
+  * `recurring_templates` : Modèles d'opérations récurrentes (`user_id`, `carry_over`, `day_of_month`, `status`, `end_month_year`).
+  * `transactions` : Instances réelles mensuelles (`user_id`, `status` ACTIVE / PENDING, `is_carried_over`, `month_year`).
+  * `monthly_balances` : Reliquat et clôtures mensuelles (`user_id`, `carried_over_from_previous`, `is_closed`).
 * **Index de performance & intégrité** :
+  * `idx_transactions_template_id` : Index sur `transactions(template_id)` (H3).
   * `idx_unique_template_per_month` : UNIQUE sur `transactions(template_id, month_year)` WHERE `template_id IS NOT NULL`.
   * `idx_transactions_month_status` : Index sur `transactions(month_year, status)`.
   * `idx_transactions_date` : Index sur `transactions(date)`.
   * `idx_subcategories_category_id` : Index sur `subcategories(category_id)`.
+  * `idx_transactions_user_id`, `idx_recurring_templates_user_id`, `idx_categories_user_id` : Index multi-profils (E4).
 
 ---
 
 ## 5. LOGIQUE MÉTIER CRITIQUE & ALGORITHMES
-### 5.1 Règle d'exclusion des dépenses "En attente" (`PENDING`)
-* **Fichier responsable** : `server/src/services/rolloverService.ts` & `server/src/routes/api.ts`.
+### 5.1 Règle d'exclusion des dépenses "En attente" (`PENDING`) & Toggle Scope
+* **Fichier responsable** : `server/src/services/rolloverService.ts` & `client/src/components/ToggleScopeModal.tsx`.
 * Toutes les agrégations financières filtrent avec `WHERE status = 'ACTIVE'`.
 * Le reste à vivre réel (`netBalance = carriedOver + income - activeExpenses`) ne déduit jamais les dépenses `PENDING`.
-* Le switch 1 clic permet de passer une dépense en attente et de suspendre sa répétition future ou de la réactiver instantanément.
+* Lors de la mise en attente d'une dépense répétée, le dialogue `ToggleScopeModal` propose de suspendre également les récurrences futures (`stopFutureRepetitions = true`), basculant le modèle parent en `PENDING_PAUSED`.
 
-### 5.2 Moteur de Report Mensuel (`Rollover Engine`) & Dérivation de Date
-* **Dérivation stricte de `month_year`** : Lors de la création d'une transaction, son mois d'affectation (`month_year`) est extrait directement de sa date (`date.substring(0, 7)`). Si l'utilisateur saisit une date du 15/09 alors qu'il consulte octobre, la transaction est enregistrée sur septembre (2026-09) et l'interface bascule directement sur le mois correspondant.
-* **Propagation de la récurrence multi-mois** : Lorsqu'une dépense répétitive ou un revenu récurrent est créé, une entrée correspondante est inscrite dans `recurring_templates` (`carry_over = 1`). Lors de la consultation de tout mois ultérieur (ex: octobre), le moteur de report duplique fidèlement l'opération avec sa date ajustée et son statut.
+### 5.2 Capacité d'épargne & Taux d'épargne
+* **Calcul temps réel** : Si le reste à vivre net est supérieur à 0, la capacité d'épargne est égale au solde net.
+* Le **taux d'épargne** est affiché en pourcentage : `((Revenus Totaux - Dépenses Actives) / Revenus Totaux) * 100`.
+
+### 5.3 Moteur de Report Mensuel (`Rollover Engine`) & Clôture de Mois
+* Clôture formelle (`is_closed = 1`) d'un mois via `PATCH /api/months/:monthYear/close` empêchant ou signalant toute modification accidentelle.
+* Évolution quotidienne de la trésorerie calculée par `/api/months/:monthYear/daily-curve` pour affichage graphique.
 
 ---
 
@@ -111,19 +146,22 @@
 
 | Méthode | Endpoint | Authentifié | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/health` | Non | Statut du serveur et version |
+| `GET` | `/api/health` | Non | Statut du serveur et version dynamique (0.06) |
 | `GET` | `/api/auth/status` | Non | Statut initial compte configuré |
 | `POST` | `/api/auth/register/start` | Non | Options WebAuthn enregistrement |
-| `POST` | `/api/auth/register/finish` | Non | Vérification WebAuthn & code de secours Argon2id |
+| `POST` | `/api/auth/register/finish` | Non | Vérification WebAuthn, Access Token + Refresh Token |
 | `POST` | `/api/auth/login/start` | Non | Options WebAuthn login |
-| `POST` | `/api/auth/login/finish` | Non | Vérification WebAuthn & cookie JWT |
+| `POST` | `/api/auth/login/finish` | Non | Vérification WebAuthn, émission tokens sécurisés |
 | `POST` | `/api/auth/login/recovery` | Non | Secours par code maître Argon2id |
-| `POST` | `/api/auth/logout` | Oui | Nettoyage cookie de session |
+| `POST` | `/api/auth/logout` | Oui | Révocation en BDD du Refresh Token et effacement des cookies |
 | `GET` | `/api/auth/me` | Oui | Profil session active |
-| `GET` | `/api/months/:monthYear` | Oui | Initialisation / Rollover du mois et agrégats |
+| `GET` | `/api/months/:monthYear` | Oui | Initialisation / Rollover du mois et agrégats financiers |
+| `PATCH`| `/api/months/:monthYear/close` | Oui | **NOUVEAU** (N4) : Clôture formelle du mois |
+| `PATCH`| `/api/months/:monthYear/reopen`| Oui | **NOUVEAU** (N4) : Réouverture d'un mois clôturé |
+| `GET` | `/api/months/:monthYear/daily-curve` | Oui | **NOUVEAU** (N5) : Courbe journalière de trésorerie pour AreaChart |
 | `POST` | `/api/transactions` | Oui | Création de transaction (dérivation date -> mois & option récurrence) |
-| `PATCH` | `/api/transactions/:id` | Oui | Modification partielle de transaction |
-| `PATCH` | `/api/transactions/:id/status`| Oui | Bascule `ACTIVE` vs `PENDING` |
+| `PATCH` | `/api/transactions/:id` | Oui | Modification de transaction avec portée temporelle (scope) |
+| `PATCH` | `/api/transactions/:id/status`| Oui | Bascule `ACTIVE` vs `PENDING` avec option `stopFutureRepetitions` |
 | `DELETE`| `/api/transactions/:id` | Oui | Suppression transaction |
 | `GET` | `/api/recurring-templates` | Oui | Liste des modèles récurrents |
 | `POST` | `/api/recurring-templates` | Oui | Création d'un modèle récurrent |
@@ -131,20 +169,109 @@
 | `DELETE`| `/api/recurring-templates/:id` | Oui | Suppression modèle |
 | `GET` | `/api/categories` | Oui | Liste complète catégories + sous-catégories |
 | `POST` | `/api/categories` | Oui | Création d'une catégorie |
-| `PATCH` | `/api/categories/:id` | Oui | **NOUVEAU** : Modification du nom/couleur d'une catégorie existante |
-| `POST` | `/api/categories/:id/subcategories` | Oui | **NOUVEAU** : Ajout d'une sous-catégorie à une catégorie existante |
-| `PATCH` | `/api/subcategories/:id` | Oui | **NOUVEAU** : Renommage d'une sous-catégorie |
-| `DELETE`| `/api/subcategories/:id` | Oui | **NOUVEAU** : Suppression d'une sous-catégorie |
-| `GET` | `/api/onboarding/status` | Oui | **NOUVEAU** : État d'avancement de l'onboarding et profil du foyer |
-| `POST` | `/api/onboarding/complete` | Oui | **NOUVEAU** : Finalisation de l'onboarding et génération initiale du budget |
-| `GET` | `/api/backup/export/json` | Oui | **P1** : Sauvegarde et export complet des données au format JSON |
-| `GET` | `/api/backup/export/db` | Oui | **P1** : Téléchargement du fichier de base de données SQLite brut |
+| `PATCH` | `/api/categories/:id` | Oui | Modification du nom/couleur d'une catégorie existante |
+| `DELETE`| `/api/categories/:id` | Oui | Suppression d'une catégorie personnalisée |
+| `POST` | `/api/categories/:id/subcategories` | Oui | Ajout d'une sous-catégorie |
+| `PATCH` | `/api/subcategories/:id` | Oui | Renommage d'une sous-catégorie |
+| `DELETE`| `/api/subcategories/:id` | Oui | Suppression sécurisée d'une sous-catégorie |
 | `GET` | `/api/stats/annual` | Oui | Statistiques annuelles (hors PENDING) |
 | `GET` | `/api/stats/category-distribution`| Oui| Répartition par catégorie |
+| `GET` | `/api/stats/top-categories` | Oui | **NOUVEAU** (N6) : Top 5 des catégories de dépenses |
+| `GET` | `/api/backup/export/json` | Oui | Export complet JSON avec horodatage et version dynamique |
+| `POST` | `/api/backup/import/json` | Oui | **NOUVEAU** (C2) : Restauration intégrale d'une sauvegarde JSON |
+| `GET` | `/api/backup/export/db` | Oui | Téléchargement du fichier SQLite brut |
+| `GET` | `/api/onboarding/status` | Oui | Profil du foyer et avancement onboarding |
+| `POST` | `/api/onboarding/complete` | Oui | Finalisation atomique de l'onboarding |
+| `GET` | `/api/savings/goals` | Oui | **NOUVEAU** (F2) : Liste des projets et tirelires d'épargne |
+| `POST` | `/api/savings/goals` | Oui | **NOUVEAU** (F2) : Création d'une tirelire/objectif d'épargne |
+| `PATCH`| `/api/savings/goals/:id` | Oui | **NOUVEAU** (F2) : Modification d'un projet d'épargne |
+| `DELETE`| `/api/savings/goals/:id` | Oui | **NOUVEAU** (F2) : Suppression d'un projet d'épargne |
+| `POST` | `/api/savings/allocate` | Oui | **NOUVEAU** (F2) : Allocation d'épargne vers un objectif |
+| `GET` | `/api/savings/allocations/:monthYear` | Oui | **NOUVEAU** (F2) : Historique des allocations du mois |
+| `GET` | `/api/transactions/search` | Oui | **NOUVEAU** (F5) : Recherche transverse multi-mois par libellé/catégorie |
+| `PATCH`| `/api/transactions/batch/status` | Oui | **NOUVEAU** (U4) : Mise en attente ou activation par lot |
+| `POST` | `/api/transactions/batch/delete` | Oui | **NOUVEAU** (U4) : Suppression groupée par lot |
+| `GET` | `/api/transactions/export/csv` | Oui | **NOUVEAU** (F4) : Export CSV encodé UTF-8 BOM |
 
 ---
 
 ## 7. JOURNAL DES MODIFICATIONS (CHANGELOG D'AUDIT)
+
+### [Version 0.07] - 2026-10-15
+* **Résolution Intégrale de l'Audit v2 (audit151026v2.md - 100% Couvert)** :
+  * **U1 - Système de Toasts avec Annulation (Undo 5s)** :
+    * Création de `client/src/store/useToastStore.ts` et `client/src/components/ui/Toast.tsx`.
+    * Notifications animées en bas à droite avec bouton interactif `[Annuler]` lors des modifications de statut et actions importantes.
+  * **U2 - Tri Interactif et Filtres Avancés par Colonne** :
+    * Dans `TransactionsTableView.tsx`, en-têtes cliquables avec flèches indicatrices : tri par Date, Libellé, Catégorie, Statut et Montant (ascendant/descendant).
+    * Filtre déroulant dynamique par sous-catégorie intégré dans `SearchBar.tsx`.
+  * **U3 - Raccourcis Clavier Power User** :
+    * `Alt + Flèche Gauche` / `Alt + Flèche Droite` : Navigation immédiate d'un mois à l'autre.
+    * `/` ou `Ctrl + F` : Focus automatique instantané sur la barre de recherche.
+  * **U4 - Sélection Multiple & Actions Groupées (Batch Actions)** :
+    * Case à cocher par ligne et *"Tout sélectionner"* dans l'en-tête du tableau.
+    * Barre d'actions contextuelle permettant de mettre en attente, réactiver ou supprimer un lot de transactions sélectionnées d'un seul clic (`PATCH /api/transactions/batch/status` et `POST /api/transactions/batch/delete`).
+  * **F1 - Plafonds Budgétaires par Catégorie (Enveloppes)** :
+    * Migration SQLite v6 : ajout de la colonne `budget_limit` sur `categories`.
+    * Saisie du plafond mensuel indicatif dans `CategoryCard.tsx` et `NewCategoryModal.tsx`.
+    * Widget de suivi dans `DashboardView.tsx` avec jauges vertes (<75%), oranges (75-99%) et rouges clignotantes (>100% avec calcul de dépassement).
+  * **F2 - Poches d'Épargne & Projets Financiers (Tirelires)** :
+    * Migration SQLite v7 : tables `savings_goals` et `savings_allocations`.
+    * Nouvel onglet de navigation *"Projets & Épargne"* et vue dédiée `SavingsView.tsx`.
+    * Suivi des objectifs (fonds de précaution, vacances, apport) et versement direct depuis la capacité d'épargne du mois.
+  * **F3 - Import Bancaire Universel (Fichiers CSV)** :
+    * Composant modal `BankImportModal.tsx` avec parseur CSV multi-séparateurs (BoursoBank, CA, BNP, Revolut...).
+    * Auto-catégorisation intelligente par mots-clés et détection des rentrées/dépenses avec prévisualisation avant validation.
+  * **F4 - Export CSV Mensuel et Annuel** :
+    * Bouton d'export CSV intégré dans l'en-tête de mois `MonthHeader.tsx` appelant `GET /api/transactions/export/csv` avec encodage UTF-8 BOM.
+  * **F5 - Recherche Transverse Multi-Mois** :
+    * Endpoint backend `GET /api/transactions/search` autorisant les requêtes multicritères sur l'ensemble de l'historique financier.
+  * **S1 - Rate Limiting Renforcé sur le Code de Secours** :
+    * Application d'un middleware dédié `recoveryLimiter` sur `/api/auth/login/recovery` limitant les tentatives à **5 essais par heure**.
+  * **S2 - Augmentation du Payload JSON Maximal à 10 Mo** :
+    * Configuration explicite `express.json({ limit: '10mb' })` dans `server/src/index.ts`.
+  * **S3 - Sauvegarde SQLite Automatique lors de la Clôture** :
+    * Fonction `autoBackupOnClose` déclenchée sur `PATCH /api/months/:monthYear/close` générant un snapshot consolidé dans `server/data/backups/budget_auto_YYYY-MM.sqlite` (conservation glissante des 12 derniers mois).
+  * **S4 - Durcissement des En-têtes Content Security Policy (CSP)** :
+    * Configuration Helmet avec directives strictes autorisant les origines locales et protégeant contre les injections XSS.
+  * **P1 - Progressive Web App (PWA) Installable** :
+    * Création de `client/public/manifest.json` et balises PWA dans `index.html` pour installation sur le bureau Windows/Mac.
+  * **P2 - Migration TanStack Query v5 Complète sur AnalyticsView** :
+    * Remplacement des requêtes manuelles `fetch` de `AnalyticsView.tsx` par des hooks `useQuery`.
+  * **P3 - Optimisation du Chunking de Vite (Vendor Splitting)** :
+    * Configuration `manualChunks` dans `vite.config.ts` divisant le bundle en morceaux optimisés (`vendor-react`, `vendor-recharts`, `vendor-icons`, `vendor-query`).
+  * **T2 - Version Dynamique de la Route Santé** :
+    * `/api/health` renvoie désormais dynamiquement la version active `0.07`.
+  * **Tests Automatisés Étoffés** :
+    * Extension de la suite de tests `server/src/tests/rollover.test.ts` validant les plafonds budgétaires et allocations d'épargne (9/9 tests réussis).
+
+### [Version 0.06] - 2026-10-15
+* **Résolution Intégrale de l'Audit Architectural & Qualité (audit151026.md)** :
+  * **C1 - Migrations SQLite Versionnées** : Création de `server/src/db/migrator.ts` avec table `schema_versions` et migrations séquentielles 1 à 5 appliquées automatiquement au boot.
+  * **C2 - Importation Complète de Sauvegarde JSON** : Implémentation de `POST /api/backup/import/json` avec transaction atomique ACID restaurant ménage, catégories, sous-catégories, templates récurrents et transactions. Bouton et sélecteur de fichier intégrés dans `CategoriesView.tsx`.
+  * **H1 - Découpage Modulaire de l'API Backend** : Remplacement du fichier monolithique `api.ts` par 6 sous-routeurs thématiques (`months.ts`, `transactions.ts`, `categories.ts`, `stats.ts`, `backup.ts`, `onboarding.ts`) montés sur `apiRouter` avec gestionnaire d'erreurs centralisé `errorHandler.ts`.
+  * **H2 - Typage TypeScript Strict (0 `as any`)** : Typage systématique des handlers et requêtes SQL avec les interfaces de `schema.ts`.
+  * **H3 - Index de Performance sur template_id** : Création de `idx_transactions_template_id` garantissant une jointure ultra-rapide sur gros volumes.
+  * **H4 - Versionnage Dynamique des Sauvegardes** : Récupération dynamique de la version depuis le `package.json` applicatif.
+  * **H5 - Nettoyage des Couleurs Hardcodées Sombre** : Migration vers des variables CSS universelles `--app-bg`, `--app-text`, `--app-subtext`.
+  * **N1 - Découpage Modulaire de TransactionsTableView** : Extraction de `SearchBar.tsx`, `AddTransactionForm.tsx`, et `TransactionRow.tsx` dans `client/src/components/transactions/`.
+  * **N2 - Découpage Modulaire de CategoriesView** : Extraction de `CategoryCard.tsx`, `SubcategoryEditor.tsx`, et `NewCategoryModal.tsx` dans `client/src/components/categories/`.
+  * **N3 - Migration TanStack Query v5** : Remplacement de tous les `useEffect`/`fetch` par `useQuery` et `useMutation` dans `App.tsx` avec invalidations fines de cache.
+  * **N4 - Clôture Formelle de Mois** : Ajout des routes `PATCH /api/months/:monthYear/close` et `reopen`, avec indicateur et bouton d'action visuels dans `MonthHeader.tsx`.
+  * **N5 - Courbe Journalière de Trésorerie (AreaChart)** : Endpoint `GET /api/months/:monthYear/daily-curve` et graphique d'évolution quotidienne du solde dans `AnalyticsView.tsx`.
+  * **N6 - Top 5 des Postes de Dépenses** : Endpoint `GET /api/stats/top-categories` et widget dédié dans `DashboardView.tsx` et `AnalyticsView.tsx`.
+  * **N7 - Raccourci Clavier Global 'N'** : Raccourci 'N' basculant instantanément le formulaire d'ajout rapide (avec protection des champs de texte).
+  * **N8 - Suppression d'Imports Inutilisés** : Nettoyage des imports morts dans `rolloverService.ts`.
+  * **E1 - Accessibilité Clavier et ARIA** : Attribution des rôles `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, étiquettes `aria-label` et fermeture universelle sur touche Escape.
+  * **E2 - Suite de Tests Automatisée Native** : Implémentation de `server/src/tests/rollover.test.ts` via `node:test` et `node:assert/strict` (7/7 tests exécutés et validés en 160ms).
+  * **E3 - Architecture Refresh Token Sécurisée** : Séparation Access Token (15 min) + Refresh Token (7 jours) avec stockage chiffré dans SQLite, rotation automatique et révocation au logout.
+  * **E4 - Colonnes et Index Multi-Profils `user_id`** : Migration v4 ajoutant `user_id` sur toutes les tables principales.
+  * **E5 - Précision et Arrondi Monétaire Strict** : Création du helper `roundCurrency` dans `dbHelpers.ts` garantissant l'absence de dérive flottante IEEE 754.
+  * **E6 - Script Bloquant Anti-FOUC** : Injection dans `<head>` de `index.html` d'un script synchrone appliquant la classe de thème avant le premier paint.
+* **Nouvelles Fonctionnalités Utilisateur (Demandes Spécifiques)** :
+  * **Dialogue de portée lors de la mise en attente (ToggleScopeModal)** : Lorsqu'une dépense répétée est mise en attente, une modale demande si l'action s'applique uniquement à ce mois ou également aux mois suivants (passant le modèle en `PENDING_PAUSED`).
+  * **Capacité d'Épargne & Taux d'Épargne** : Nouvelle carte KPI avec icône `PiggyBank` affichant la capacité d'épargne en euros et le pourcentage du taux d'épargne en direct.
+  * **Refonte Thème Clair (Pastel Bleu / Vert)** : Remplacement complet des teintes grises par une palette pastel fraîche, aérée et moderne (`#f0f7fa`, `#ffffff`, `#cfe2ed`, `#0c2b3a`, `#0284c7`, `#059669`).
 
 ### [Version 0.05] - 2026-10-15
 * **Refactorisation & Découpage Modulaire de l'Assistant d'Onboarding** :

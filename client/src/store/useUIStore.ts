@@ -6,6 +6,7 @@ export type TabType =
   | 'recurring'
   | 'current'
   | 'unforeseen'
+  | 'savings'
   | 'categories'
   | 'analytics';
 

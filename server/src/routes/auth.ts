@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -44,6 +45,37 @@ function getAndConsumeChallenge(key: string): string | null {
   }
 
   return row.challenge;
+}
+
+/**
+ * Génère un Access Token (15m) et un Refresh Token cryptographique (7d) persisté en base SQLite (E3)
+ */
+export function issueAuthTokens(res: Response, userId: string, username: string): { accessToken: string; refreshToken: string } {
+  const accessToken = jwt.sign({ userId, username }, env.JWT_SECRET, { expiresIn: '15m' });
+  const refreshToken = crypto.randomBytes(40).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+  db.prepare(`
+    INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, revoked)
+    VALUES (?, ?, ?, ?, 0)
+  `).run(crypto.randomUUID(), userId, tokenHash, expiresAt);
+
+  res.cookie('auth_token', accessToken, {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 15 * 60 * 1000,
+  });
+
+  res.cookie('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  return { accessToken, refreshToken };
 }
 
 const registerStartSchema = z.object({
@@ -146,6 +178,7 @@ authRouter.post('/register/finish', async (req: Request, res: Response) => {
       expectedChallenge,
       expectedOrigin: env.CLIENT_ORIGIN,
       expectedRPID: env.RP_ID,
+      requireUserVerification: false,
     });
 
     if (!verification.verified || !verification.registrationInfo) {
@@ -163,10 +196,9 @@ authRouter.post('/register/finish', async (req: Request, res: Response) => {
       | { id: string; recovery_hash: string }
       | undefined;
 
-    let userId = user?.id;
+    const userId = user?.id ?? crypto.randomUUID();
 
     if (!user) {
-      userId = crypto.randomUUID();
       // Générer un code de secours maître sécurisé (ex: 4 blocs de 4 lettres/chiffres)
       recoveryCode = crypto.randomBytes(8).toString('hex').toUpperCase().match(/.{1,4}/g)?.join('-') || 'RECOVERY-CODE-1234';
       recoveryHash = await argon2.hash(recoveryCode);
@@ -189,15 +221,8 @@ authRouter.post('/register/finish', async (req: Request, res: Response) => {
       response.response.transports ? JSON.stringify(response.response.transports) : null
     );
 
-    // Génération du JWT de session
-    const token = jwt.sign({ userId, username }, env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    // Génération de la paire Access Token (15m) + Refresh Token (7d)
+    issueAuthTokens(res, userId, username);
 
     res.json({
       verified: true,
@@ -295,6 +320,7 @@ authRouter.post('/login/finish', async (req: Request, res: Response) => {
         counter: passkey.counter,
         transports: passkey.transports ? JSON.parse(passkey.transports) : undefined,
       },
+      requireUserVerification: false,
     });
 
     if (!verification.verified || !verification.authenticationInfo) {
@@ -308,14 +334,7 @@ authRouter.post('/login/finish', async (req: Request, res: Response) => {
       passkey.credential_id
     );
 
-    const token = jwt.sign({ userId: user.id, username }, env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    issueAuthTokens(res, user.id, username);
 
     res.json({
       verified: true,
@@ -327,10 +346,18 @@ authRouter.post('/login/finish', async (req: Request, res: Response) => {
   }
 });
 
+const recoveryLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 heure
+  max: 5, // Maximum 5 tentatives de code de secours par heure
+  message: { error: 'Trop de tentatives de code de secours. Réessayez dans une heure.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /**
  * 5. Secours d'urgence (Recovery Code Hash via Argon2id)
  */
-authRouter.post('/login/recovery', async (req: Request, res: Response) => {
+authRouter.post('/login/recovery', recoveryLimiter, async (req: Request, res: Response) => {
   const parseResult = recoveryLoginSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({ error: 'Format invalide' });
@@ -353,14 +380,7 @@ authRouter.post('/login/recovery', async (req: Request, res: Response) => {
     return;
   }
 
-  const token = jwt.sign({ userId: user.id, username }, env.JWT_SECRET, { expiresIn: '7d' });
-
-  res.cookie('auth_token', token, {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  issueAuthTokens(res, user.id, username);
 
   res.json({
     verified: true,
@@ -369,10 +389,56 @@ authRouter.post('/login/recovery', async (req: Request, res: Response) => {
 });
 
 /**
- * 6. Déconnexion
+ * 6. Renouvellement de session via Refresh Token (E3)
  */
-authRouter.post('/logout', (_req: Request, res: Response) => {
+authRouter.post('/refresh', (req: Request, res: Response) => {
+  const rawRefreshToken = req.cookies?.['refresh_token'] || req.body?.refreshToken;
+  if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+    res.status(401).json({ error: 'Refresh token manquant.' });
+    return;
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+  const stored = db.prepare(`
+    SELECT id, user_id, expires_at, revoked 
+    FROM refresh_tokens 
+    WHERE token_hash = ? AND revoked = 0
+  `).get(tokenHash) as { id: string; user_id: string; expires_at: number; revoked: number } | undefined;
+
+  if (!stored || stored.expires_at <= Date.now()) {
+    res.clearCookie('auth_token');
+    res.clearCookie('refresh_token');
+    res.status(401).json({ error: 'Refresh token invalide ou expiré.' });
+    return;
+  }
+
+  // Révocation de l'ancien token (rotation stricte)
+  db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?').run(stored.id);
+
+  const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(stored.user_id) as
+    | { id: string; username: string }
+    | undefined;
+
+  if (!user) {
+    res.status(401).json({ error: 'Utilisateur introuvable.' });
+    return;
+  }
+
+  issueAuthTokens(res, user.id, user.username);
+  res.json({ success: true, user: { id: user.id, username: user.username } });
+});
+
+/**
+ * 7. Déconnexion avec révocation du Refresh Token
+ */
+authRouter.post('/logout', (req: Request, res: Response) => {
+  const rawRefreshToken = req.cookies?.['refresh_token'];
+  if (rawRefreshToken && typeof rawRefreshToken === 'string') {
+    const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+    db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?').run(tokenHash);
+  }
   res.clearCookie('auth_token');
+  res.clearCookie('refresh_token');
   res.json({ success: true });
 });
 

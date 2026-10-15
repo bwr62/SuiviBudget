@@ -12,7 +12,31 @@ export interface Category {
   color: string;
   is_system: number;
   is_active: number;
+  budget_limit?: number | null;
   subcategories?: Subcategory[];
+}
+
+export interface SavingsGoal {
+  id: string;
+  user_id?: string;
+  title: string;
+  target_amount: number;
+  current_amount: number;
+  target_date?: string | null;
+  icon?: string;
+  color?: string;
+  created_at?: string;
+}
+
+export interface SavingsAllocation {
+  id: string;
+  goal_id: string;
+  month_year: string;
+  amount: number;
+  date: string;
+  goal_title?: string;
+  goal_color?: string;
+  created_at?: string;
 }
 
 export interface Subcategory {
