@@ -16,6 +16,9 @@ export interface Category {
   subcategories?: Subcategory[];
 }
 
+export type SavingsDepositTiming = 'START_OF_MONTH' | 'END_OF_MONTH';
+export type SavingsInterestMode = 'BONUS' | 'DEDUCT';
+
 export interface SavingsGoal {
   id: string;
   user_id?: string;
@@ -24,6 +27,8 @@ export interface SavingsGoal {
   current_amount: number;
   target_date?: string | null;
   interest_rate?: number | null; // Taux net annuel en %
+  deposit_timing?: SavingsDepositTiming; // 'START_OF_MONTH' ou 'END_OF_MONTH'
+  interest_mode?: SavingsInterestMode; // 'BONUS' ou 'DEDUCT'
   icon?: string;
   color?: string;
   created_at?: string;

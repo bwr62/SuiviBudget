@@ -131,6 +131,19 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 9,
+    name: '009_savings_timing_and_mode',
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info(savings_goals)").all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'deposit_timing')) {
+        db.exec("ALTER TABLE savings_goals ADD COLUMN deposit_timing TEXT DEFAULT 'START_OF_MONTH';");
+      }
+      if (!cols.some((c) => c.name === 'interest_mode')) {
+        db.exec("ALTER TABLE savings_goals ADD COLUMN interest_mode TEXT DEFAULT 'BONUS';");
+      }
+    },
+  },
 ];
 
 /**

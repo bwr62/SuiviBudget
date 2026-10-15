@@ -41,6 +41,9 @@ export interface Category {
   budget_limit?: number | null;
 }
 
+export type SavingsDepositTiming = 'START_OF_MONTH' | 'END_OF_MONTH';
+export type SavingsInterestMode = 'BONUS' | 'DEDUCT';
+
 export interface SavingsGoal {
   id: string;
   user_id?: string;
@@ -49,6 +52,8 @@ export interface SavingsGoal {
   current_amount: number;
   target_date?: string | null;
   interest_rate?: number | null; // Taux de rémunération annuel net (en %, ex: 3.0 pour 3%)
+  deposit_timing?: SavingsDepositTiming; // 'START_OF_MONTH' (1ère quinzaine gagnée) ou 'END_OF_MONTH' (départ mois suivant)
+  interest_mode?: SavingsInterestMode; // 'BONUS' (sécurité Livret A fin d'année) ou 'DEDUCT' (intérêts déduits de l'effort)
   icon?: string;
   color?: string;
   created_at?: string;
@@ -200,6 +205,8 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   current_amount REAL NOT NULL DEFAULT 0.0,
   target_date TEXT,
   interest_rate REAL DEFAULT NULL,
+  deposit_timing TEXT DEFAULT 'START_OF_MONTH' CHECK(deposit_timing IN ('START_OF_MONTH', 'END_OF_MONTH')),
+  interest_mode TEXT DEFAULT 'BONUS' CHECK(interest_mode IN ('BONUS', 'DEDUCT')),
   icon TEXT DEFAULT 'PiggyBank',
   color TEXT DEFAULT '#10B981',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PiggyBank, Plus, Target, Trash2, Calendar, Coins, TrendingUp, Percent, Edit2 } from 'lucide-react';
-import { SavingsGoal, SavingsAllocation } from '../types';
+import { SavingsGoal, SavingsAllocation, SavingsDepositTiming, SavingsInterestMode } from '../types';
 import { showToast } from '../store/useToastStore';
 
 interface SavingsViewProps {
@@ -29,40 +29,44 @@ function getMonthsDiff(startMonthYear: string, endMonthYear: string): number {
 
 export interface SavingsScheduleResult {
   monthsRemaining: number;
-  monthlyDepositNeeded: number; // Montant brut à épargner chaque mois (ex: 285€)
-  totalDeposited: number; // Total du capital versé (initial + mensualités)
+  monthlyDepositNeeded: number; // Montant à épargner chaque mois (brut si bonus, ou allégé si déduit)
+  totalDeposited: number; // Total du capital versé par l'utilisateur
   estimatedInterests: number; // Intérêts nets cumulés sur le capital initial et versements mensuels
   totalAtTarget: number; // Capital total disponible à l'échéance (versements + intérêts)
   interestOnInitial: number;
   interestOnMonthlyDeposits: number;
+  depositTiming: SavingsDepositTiming;
+  interestMode: SavingsInterestMode;
 }
 
 /**
- * Calcule l'échéancier d'épargne officiel :
- * 1. Détermine la mensualité brute nécessaire pour combler l'écart entre le capital actuel et la cible :
- *    mensualité = (Cible - Capital initial) / mois restants (ex: (3000 - 150) / 10 = 285 €/mois)
- * 2. Calcule les intérêts cumulés selon les règles officielles des livrets d'épargne (règle des quinzaines / capitalisation annuelle) :
- *    - Intérêts générés par le capital initial placé sur toute la durée
- *    - Intérêts générés progressivement par les versements mensuels (24 quinzaines par an)
+ * Calcule l'échéancier d'épargne officiel avec options configurables :
+ * 1. Date du virement dans la règle des quinzaines :
+ *    - 'START_OF_MONTH' : virement avant le 15 (ex: le 5 du mois après la paie), rapporte dès le 16 (1 quinzaine gagnée dès le 1er mois).
+ *    - 'END_OF_MONTH' : approche prudente (virement fin de mois), porte intérêt à compter du 1er du mois suivant.
+ * 2. Prise en compte des intérêts :
+ *    - 'BONUS' (recommandé pour Livret A) : les intérêts s'ajoutent en bonus en fin d'année, on épargne 100% du capital.
+ *    - 'DEDUCT' : les intérêts prévisionnels réduisent l'effort d'épargne mensuel nécessaire pour atteindre pile la cible.
  */
 export function calculateSavingsSchedule(
   currentAmount: number,
   targetAmount: number,
   annualRateNetPercent: number | null | undefined,
   currentMonthYear: string,
-  targetDateMonthYear: string | null | undefined
+  targetDateMonthYear: string | null | undefined,
+  depositTiming: SavingsDepositTiming = 'START_OF_MONTH',
+  interestMode: SavingsInterestMode = 'BONUS'
 ): SavingsScheduleResult {
   const monthsRemaining = targetDateMonthYear ? getMonthsDiff(currentMonthYear, targetDateMonthYear) : 0;
   const remainingCapitalToSave = Math.max(0, targetAmount - currentAmount);
 
-  // Si pas de mois restants, mensualité = reste à charge total en un coup
-  const monthlyDepositNeeded = monthsRemaining > 0 
+  // Mensualité brute par défaut (mode BONUS)
+  let monthlyDepositNeeded = monthsRemaining > 0 
     ? Math.round((remainingCapitalToSave / monthsRemaining) * 100) / 100 
     : remainingCapitalToSave;
 
-  const totalDeposited = Math.round((currentAmount + (monthlyDepositNeeded * monthsRemaining)) * 100) / 100;
-
   if (!annualRateNetPercent || annualRateNetPercent <= 0 || monthsRemaining <= 0) {
+    const totalDeposited = Math.round((currentAmount + (monthlyDepositNeeded * monthsRemaining)) * 100) / 100;
     return {
       monthsRemaining,
       monthlyDepositNeeded,
@@ -71,20 +75,19 @@ export function calculateSavingsSchedule(
       totalAtTarget: totalDeposited,
       interestOnInitial: 0,
       interestOnMonthlyDeposits: 0,
+      depositTiming,
+      interestMode,
     };
   }
 
   const rateDecimal = annualRateNetPercent / 100;
   const quinzaineRate = rateDecimal / 24; // Règle officielle des 24 quinzaines par an
 
-  // 1. Intérêts cumulés sur le capital initial (présent sur 2 * monthsRemaining quinzaines)
-  // Règle Livret : Capitalisation annuelle au 31 décembre
+  // 1. Intérêts cumulés sur le capital initial
   let simInitial = currentAmount;
   let accumulatedInterestInitial = 0;
   for (let m = 1; m <= monthsRemaining; m++) {
-    // 2 quinzaines par mois
     accumulatedInterestInitial += simInitial * (quinzaineRate * 2);
-    // Capitalisation au bout de chaque tranche de 12 mois
     if (m % 12 === 0) {
       simInitial += accumulatedInterestInitial;
       accumulatedInterestInitial = 0;
@@ -92,19 +95,37 @@ export function calculateSavingsSchedule(
   }
   const interestOnInitial = (simInitial - currentAmount) + accumulatedInterestInitial;
 
-  // 2. Intérêts cumulés sur les versements mensuels réguliers
-  // Chaque versement de début de mois produit des intérêts à partir de la 1ère quinzaine suivante (en moyenne ~2 quinzaines par mois restant)
-  let simMonthlyDepositsTotal = 0;
-  let simMonthlyInterest = 0;
-  for (let m = 1; m <= monthsRemaining; m++) {
-    // Versement effectué au mois m
-    const monthsInvested = monthsRemaining - m;
-    const quinzainesInvested = Math.max(0, monthsInvested * 2);
-    simMonthlyDepositsTotal += monthlyDepositNeeded;
-    simMonthlyInterest += monthlyDepositNeeded * quinzaineRate * quinzainesInvested;
+  // Fonction helper pour calculer les intérêts des versements réguliers
+  const computeInterestOnMonthly = (depositAmount: number): number => {
+    let simMonthlyInterest = 0;
+    for (let m = 1; m <= monthsRemaining; m++) {
+      const monthsInvested = monthsRemaining - m;
+      // Si virement en début de mois (avant le 15) : +1 quinzaine travaillée le mois même (ex: du 16 au 30/31)
+      const quinzainesInvested = depositTiming === 'START_OF_MONTH'
+        ? (monthsInvested * 2) + 1
+        : monthsInvested * 2;
+      simMonthlyInterest += depositAmount * quinzaineRate * quinzainesInvested;
+    }
+    return simMonthlyInterest;
+  };
+
+  // Si l'utilisateur choisit 'DEDUCT', les intérêts viennent réduire l'effort mensuel nécessaire
+  if (interestMode === 'DEDUCT') {
+    // Somme factorielle des quinzaines travaillées
+    let sumQuinzaines = 0;
+    for (let m = 1; m <= monthsRemaining; m++) {
+      const monthsInvested = monthsRemaining - m;
+      sumQuinzaines += (depositTiming === 'START_OF_MONTH' ? (monthsInvested * 2) + 1 : monthsInvested * 2);
+    }
+    // Cible = Capital initial + Intérêt initial + Mensualité * (monthsRemaining + sumQuinzaines * quinzaineRate)
+    const factor = monthsRemaining + (sumQuinzaines * quinzaineRate);
+    const neededFromDeposits = Math.max(0, targetAmount - (currentAmount + interestOnInitial));
+    monthlyDepositNeeded = factor > 0 ? Math.round((neededFromDeposits / factor) * 100) / 100 : 0;
   }
 
+  const simMonthlyInterest = computeInterestOnMonthly(monthlyDepositNeeded);
   const totalEstimatedInterests = Math.round((interestOnInitial + simMonthlyInterest) * 100) / 100;
+  const totalDeposited = Math.round((currentAmount + (monthlyDepositNeeded * monthsRemaining)) * 100) / 100;
   const totalAtTarget = Math.round((totalDeposited + totalEstimatedInterests) * 100) / 100;
 
   return {
@@ -115,6 +136,8 @@ export function calculateSavingsSchedule(
     totalAtTarget,
     interestOnInitial: Math.round(interestOnInitial * 100) / 100,
     interestOnMonthlyDeposits: Math.round(simMonthlyInterest * 100) / 100,
+    depositTiming,
+    interestMode,
   };
 }
 
@@ -132,6 +155,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
   const [initialAmount, setInitialAmount] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [interestRate, setInterestRate] = useState('');
+  const [depositTiming, setDepositTiming] = useState<'START_OF_MONTH' | 'END_OF_MONTH'>('START_OF_MONTH');
+  const [interestMode, setInterestMode] = useState<'BONUS' | 'DEDUCT'>('BONUS');
   const [color, setColor] = useState('#10B981');
 
   // Formulaire d'allocation rapide
@@ -167,6 +192,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
     setInitialAmount('');
     setTargetDate('');
     setInterestRate('');
+    setDepositTiming('START_OF_MONTH');
+    setInterestMode('BONUS');
     setColor('#10B981');
     setEditingGoal(null);
   };
@@ -178,6 +205,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
     setInitialAmount(String(goal.current_amount));
     setTargetDate(goal.target_date || '');
     setInterestRate(goal.interest_rate !== undefined && goal.interest_rate !== null ? String(goal.interest_rate) : '');
+    setDepositTiming(goal.deposit_timing || 'START_OF_MONTH');
+    setInterestMode(goal.interest_mode || 'BONUS');
     setColor(goal.color || '#10B981');
     setShowAddGoalModal(true);
   };
@@ -196,6 +225,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
           current_amount: initialAmount ? parseFloat(initialAmount.replace(',', '.')) : 0,
           target_date: targetDate || null,
           interest_rate: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
+          deposit_timing: depositTiming,
+          interest_mode: interestMode,
           color,
         }),
       });
@@ -225,6 +256,8 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
           current_amount: parseFloat(initialAmount.replace(',', '.')),
           target_date: targetDate || null,
           interest_rate: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
+          deposit_timing: depositTiming,
+          interest_mode: interestMode,
           color,
         }),
       });
@@ -367,7 +400,9 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
               goal.target_amount,
               goal.interest_rate,
               currentMonthYear,
-              goal.target_date
+              goal.target_date,
+              goal.deposit_timing || 'START_OF_MONTH',
+              goal.interest_mode || 'BONUS'
             );
 
             return (
@@ -603,13 +638,60 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                 </div>
               </div>
 
+              {/* Options avancées pour les règles officielles */}
+              {interestRate && parseFloat(interestRate) > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-lg bg-slate-950/70 border border-slate-800">
+                  <div>
+                    <label className="block text-[10px] text-slate-300 font-medium mb-1">
+                      Date de versement mensuel
+                    </label>
+                    <select
+                      value={depositTiming}
+                      onChange={(e) => setDepositTiming(e.target.value as 'START_OF_MONTH' | 'END_OF_MONTH')}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-emerald-500"
+                    >
+                      <option value="START_OF_MONTH">Début de mois (avant le 15, après paie)</option>
+                      <option value="END_OF_MONTH">Fin de mois (approche prudente)</option>
+                    </select>
+                    <span className="block text-[9px] text-slate-400 mt-0.5">
+                      {depositTiming === 'START_OF_MONTH' ? 'Gagne 1 quinzaine travaillée dès le 1er mois' : 'Porte intérêt au 1er du mois suivant'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-slate-300 font-medium mb-1">
+                      Gestion des intérêts
+                    </label>
+                    <select
+                      value={interestMode}
+                      onChange={(e) => setInterestMode(e.target.value as 'BONUS' | 'DEDUCT')}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-emerald-500"
+                    >
+                      <option value="BONUS">Bonus fin d'année (Prudent & Recommandé)</option>
+                      <option value="DEDUCT">Déduire de l'effort mensuel</option>
+                    </select>
+                    <span className="block text-[9px] text-slate-400 mt-0.5">
+                      {interestMode === 'BONUS' ? 'Épargne 100% du capital cible (intérêts en sus)' : 'Réduit la mensualité pour viser pile la cible'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Aperçu en direct de la simulation dans la modale */}
               {(() => {
                 const parsedTarget = parseFloat(targetAmount.replace(',', '.'));
                 const parsedCurrent = initialAmount ? parseFloat(initialAmount.replace(',', '.')) : 0;
                 const parsedRate = interestRate ? parseFloat(interestRate.replace(',', '.')) : 0;
                 if (parsedTarget > 0 && targetDate) {
-                  const schedule = calculateSavingsSchedule(parsedCurrent, parsedTarget, parsedRate, currentMonthYear, targetDate);
+                  const schedule = calculateSavingsSchedule(
+                    parsedCurrent,
+                    parsedTarget,
+                    parsedRate,
+                    currentMonthYear,
+                    targetDate,
+                    depositTiming,
+                    interestMode
+                  );
                   return (
                     <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] space-y-1.5 text-emerald-300">
                       <div className="flex items-center justify-between font-semibold">
@@ -627,14 +709,14 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                           <div className="flex items-center justify-between font-medium">
                             <span className="flex items-center gap-1 text-emerald-400">
                               <TrendingUp className="w-3.5 h-3.5" />
-                              <span>Intérêts cumulés estimés (règle quinzaines) :</span>
+                              <span>Intérêts cumulés estimés ({schedule.depositTiming === 'START_OF_MONTH' ? 'virement avant le 15' : 'virement fin de mois'}) :</span>
                             </span>
                             <span className="font-mono text-emerald-400 font-bold">
                               +{schedule.estimatedInterests.toFixed(2)} €
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-slate-400">
-                            <span>Capital disponible à date de fin :</span>
+                            <span>{schedule.interestMode === 'BONUS' ? 'Capital final disponible (cible + bonus) :' : 'Capital final disponible :'}</span>
                             <span className="font-mono text-slate-100 font-bold">
                               {schedule.totalAtTarget.toFixed(2)} €
                             </span>
@@ -782,7 +864,9 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                   adjustingGoal.target_amount,
                   adjustingGoal.interest_rate,
                   currentMonthYear,
-                  adjustingGoal.target_date
+                  adjustingGoal.target_date,
+                  adjustingGoal.deposit_timing || 'START_OF_MONTH',
+                  adjustingGoal.interest_mode || 'BONUS'
                 );
                 return (
                   <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] space-y-1 text-slate-300">

@@ -305,5 +305,39 @@ describe('RolloverEngine Unit Tests', () => {
       const totalAvailable = Math.round((currentAmount + (monthlyDeposit * monthsRemaining) + totalInterests) * 100) / 100;
       assert.equal(totalAvailable, 3035.81);
     });
+
+    it('should support START_OF_MONTH (+1 quinzaine) vs END_OF_MONTH and BONUS vs DEDUCT', () => {
+      // Cas : 0€ actuel, 3000€ cible, 12 mois, taux 2%
+      // 12 versements de 250€.
+      const monthsRemaining = 12;
+      const deposit = 250.00;
+      const quinzaineRate = 0.02 / 24;
+
+      // START_OF_MONTH : chaque versement gagne 1 quinzaine le mois même -> somme des quinzaines = 23 + 21 + ... + 1 = 144
+      let quinzainesStart = 0;
+      for (let m = 1; m <= monthsRemaining; m++) {
+        quinzainesStart += ((monthsRemaining - m) * 2) + 1;
+      }
+      assert.equal(quinzainesStart, 144);
+      const interestStart = Math.round((deposit * quinzaineRate * quinzainesStart) * 100) / 100;
+      // (144 / 24) * 250 * 0.02 = 6 * 250 * 0.02 = 30.00€
+      assert.equal(interestStart, 30.00);
+
+      // END_OF_MONTH : approche prudente (ne porte intérêt qu'au 1er du mois suivant) -> somme des quinzaines = 22 + 20 + ... + 0 = 132
+      let quinzainesEnd = 0;
+      for (let m = 1; m <= monthsRemaining; m++) {
+        quinzainesEnd += (monthsRemaining - m) * 2;
+      }
+      assert.equal(quinzainesEnd, 132);
+      const interestEnd = Math.round((deposit * quinzaineRate * quinzainesEnd) * 100) / 100;
+      // (132 / 24) * 250 * 0.02 = 5.5 * 250 * 0.02 = 27.50€
+      assert.equal(interestEnd, 27.50);
+
+      // Test DEDUCT : les 30€ d'intérêts prévisionnels viennent réduire l'effort mensuel nécessaire
+      // 3000 / (12 + 144 * (0.02/24)) = 3000 / (12 + 0.12) = 3000 / 12.12 = 247.52€
+      const factor = monthsRemaining + (quinzainesStart * quinzaineRate);
+      const reducedDeposit = Math.round((3000.00 / factor) * 100) / 100;
+      assert.equal(reducedDeposit, 247.52);
+    });
   });
 });
