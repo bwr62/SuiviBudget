@@ -56,6 +56,19 @@ export interface MonthlySummary {
   netBalance: number;
 }
 
+export type HousingStatus = 'TENANT' | 'OWNER_WITH_LOAN' | 'OWNER_PAID_OFF' | 'FREE_HOUSING';
+
+export interface HouseholdProfile {
+  id: number;
+  has_completed_onboarding: number;
+  adults_count: number;
+  children_count: number;
+  pets_count: number;
+  housing_status: HousingStatus;
+  payday_default: number;
+  updated_at?: string;
+}
+
 export interface RecurringTemplate {
   id: string;
   title: string;
@@ -66,6 +79,7 @@ export interface RecurringTemplate {
   day_of_month: number;
   status: 'ACTIVE' | 'PENDING_PAUSED';
   carry_over: number;
+  end_month_year?: string | null;
   category_name?: string;
   category_icon?: string;
   category_color?: string;

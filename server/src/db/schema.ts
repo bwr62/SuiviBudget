@@ -36,6 +36,19 @@ export interface Subcategory {
   name: string;
 }
 
+export type HousingStatus = 'TENANT' | 'OWNER_WITH_LOAN' | 'OWNER_PAID_OFF' | 'FREE_HOUSING';
+
+export interface HouseholdProfile {
+  id: number; // 1
+  has_completed_onboarding: number;
+  adults_count: number;
+  children_count: number;
+  pets_count: number;
+  housing_status: HousingStatus;
+  payday_default: number;
+  updated_at?: string;
+}
+
 export type RecurringTemplateStatus = 'ACTIVE' | 'PENDING_PAUSED';
 
 export interface RecurringTemplate {
@@ -48,6 +61,7 @@ export interface RecurringTemplate {
   day_of_month: number;
   status: RecurringTemplateStatus;
   carry_over: number; // 1 = se reporte sur les mois suivants, 0 = non
+  end_month_year?: string | null; // Format 'YYYY-MM'
   created_at?: string;
 }
 
@@ -100,6 +114,18 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
   created_at INTEGER NOT NULL -- timestamp ms
 );
 
+-- Profil du foyer et état d'onboarding (Singleton id=1)
+CREATE TABLE IF NOT EXISTS household_profile (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  has_completed_onboarding INTEGER NOT NULL DEFAULT 0,
+  adults_count INTEGER NOT NULL DEFAULT 1,
+  children_count INTEGER NOT NULL DEFAULT 0,
+  pets_count INTEGER NOT NULL DEFAULT 0,
+  housing_status TEXT CHECK(housing_status IN ('TENANT', 'OWNER_WITH_LOAN', 'OWNER_PAID_OFF', 'FREE_HOUSING')),
+  payday_default INTEGER NOT NULL DEFAULT 1,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 2. Catégories et Sous-catégories
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,
@@ -129,6 +155,7 @@ CREATE TABLE IF NOT EXISTS recurring_templates (
   day_of_month INTEGER NOT NULL CHECK(day_of_month BETWEEN 1 AND 31),
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'PENDING_PAUSED')),
   carry_over INTEGER NOT NULL DEFAULT 1, -- 1 = se reporte sur les mois suivants
+  end_month_year TEXT, -- Format 'YYYY-MM', NULL = sans fin
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (category_id) REFERENCES categories(id),
   FOREIGN KEY (subcategory_id) REFERENCES subcategories(id)

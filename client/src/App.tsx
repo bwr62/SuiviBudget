@@ -6,6 +6,7 @@ import { TransactionsTableView } from './components/TransactionsTableView';
 import { CategoriesView } from './components/CategoriesView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { AuthModal } from './components/AuthModal';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { useUIStore } from './store/useUIStore';
 import { MonthlySummary, Transaction, Category } from './types';
 
@@ -15,6 +16,7 @@ export function App() {
   const [user, setUser] = useState<{ id: string; username: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [hasExistingUser, setHasExistingUser] = useState(false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
   // Synchronisation du thème sur l'élément body
   useEffect(() => {
@@ -41,6 +43,13 @@ export function App() {
         if (meRes.ok) {
           const meData = await meRes.json();
           setUser(meData.user);
+
+          // Vérifier si l'utilisateur a complété l'onboarding
+          const onbRes = await fetch('/api/onboarding/status', { credentials: 'include' });
+          if (onbRes.ok) {
+            const onbData = await onbRes.json();
+            setHasCompletedOnboarding(onbData.has_completed_onboarding === 1);
+          }
         }
       } catch (err) {
         console.error('Erreur auth check:', err);
@@ -50,6 +59,18 @@ export function App() {
     };
 
     checkAuth();
+  }, []);
+
+  const refreshOnboardingStatus = useCallback(async () => {
+    try {
+      const onbRes = await fetch('/api/onboarding/status', { credentials: 'include' });
+      if (onbRes.ok) {
+        const onbData = await onbRes.json();
+        setHasCompletedOnboarding(onbData.has_completed_onboarding === 1);
+      }
+    } catch (e) {
+      console.error(e);
+    }
   }, []);
 
   // 2. Chargement des catégories
@@ -109,6 +130,22 @@ export function App() {
     }
   };
 
+  const handleUpdateTransaction = async (
+    id: string,
+    data: Partial<Transaction>,
+    scope: 'CURRENT_MONTH_ONLY' | 'CURRENT_AND_FUTURE' = 'CURRENT_MONTH_ONLY'
+  ) => {
+    const res = await fetch(`/api/transactions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ...data, scope }),
+    });
+    if (res.ok) {
+      await fetchMonthData();
+    }
+  };
+
   const handleToggleStatus = async (
     id: string,
     newStatus: 'ACTIVE' | 'PENDING',
@@ -154,7 +191,23 @@ export function App() {
       {!user && (
         <AuthModal
           hasExistingUser={hasExistingUser}
-          onSuccess={(loggedInUser) => setUser(loggedInUser)}
+          onSuccess={async (loggedInUser) => {
+            setUser(loggedInUser);
+            await refreshOnboardingStatus();
+          }}
+        />
+      )}
+
+      {/* Assistant de Première Connexion (Onboarding Wizard) */}
+      {user && hasCompletedOnboarding === false && (
+        <OnboardingWizard
+          categories={categories}
+          currentMonthYear={currentMonthYear}
+          onComplete={async () => {
+            setHasCompletedOnboarding(true);
+            await fetchMonthData();
+            await fetchCategories();
+          }}
         />
       )}
 
@@ -186,6 +239,7 @@ export function App() {
               categories={categories}
               currentMonthYear={currentMonthYear}
               onAddTransaction={handleAddTransaction}
+              onUpdateTransaction={handleUpdateTransaction}
               onToggleStatus={handleToggleStatus}
               onDeleteTransaction={handleDeleteTransaction}
             />
@@ -199,6 +253,7 @@ export function App() {
               categories={categories}
               currentMonthYear={currentMonthYear}
               onAddTransaction={handleAddTransaction}
+              onUpdateTransaction={handleUpdateTransaction}
               onToggleStatus={handleToggleStatus}
               onDeleteTransaction={handleDeleteTransaction}
             />
@@ -212,6 +267,7 @@ export function App() {
               categories={categories}
               currentMonthYear={currentMonthYear}
               onAddTransaction={handleAddTransaction}
+              onUpdateTransaction={handleUpdateTransaction}
               onToggleStatus={handleToggleStatus}
               onDeleteTransaction={handleDeleteTransaction}
             />
@@ -225,6 +281,7 @@ export function App() {
               categories={categories}
               currentMonthYear={currentMonthYear}
               onAddTransaction={handleAddTransaction}
+              onUpdateTransaction={handleUpdateTransaction}
               onToggleStatus={handleToggleStatus}
               onDeleteTransaction={handleDeleteTransaction}
             />

@@ -42,6 +42,7 @@ const transactionUpdateSchema = z.object({
   subcategory_id: z.string().nullable().optional(),
   status: z.enum(['ACTIVE', 'PENDING']).optional(),
   notes: z.string().nullable().optional(),
+  scope: z.enum(['CURRENT_MONTH_ONLY', 'CURRENT_AND_FUTURE']).optional(),
 });
 
 const toggleStatusSchema = z.object({
@@ -58,6 +59,7 @@ const recurringTemplateCreateSchema = z.object({
   day_of_month: z.number().int().min(1).max(31),
   status: z.enum(['ACTIVE', 'PENDING_PAUSED']).default('ACTIVE'),
   carry_over: z.number().int().min(0).max(1).default(1),
+  end_month_year: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
 });
 
 const recurringTemplateUpdateSchema = recurringTemplateCreateSchema.partial();
@@ -217,25 +219,19 @@ apiRouter.patch('/transactions/:id', (req: Request, res: Response) => {
     return;
   }
 
-  const fields = parse.data;
+  const { scope = 'CURRENT_MONTH_ONLY', ...fields } = parse.data;
 
   // Si la date change, synchroniser automatiquement month_year
   if (fields.date && !fields.month_year) {
     fields.month_year = fields.date.substring(0, 7);
   }
 
-  const updates: string[] = [];
-  const values: any[] = [];
-
-  for (const [key, val] of Object.entries(fields)) {
-    updates.push(`${key} = ?`);
-    values.push(val);
-  }
-
-  if (updates.length > 0) {
-    values.push(req.params.id);
-    db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  }
+  // Utiliser le moteur avec portée de propagation temporelle
+  rolloverService.updateTransactionWithScope({
+    transactionId: req.params.id as string,
+    data: fields,
+    scope,
+  });
 
   const updated = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
   res.json(updated);
@@ -305,8 +301,8 @@ apiRouter.post('/recurring-templates', (req: Request, res: Response) => {
 
   db.prepare(`
     INSERT INTO recurring_templates (
-      id, title, amount, type, category_id, subcategory_id, day_of_month, status, carry_over
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, title, amount, type, category_id, subcategory_id, day_of_month, status, carry_over, end_month_year
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.title,
@@ -316,7 +312,8 @@ apiRouter.post('/recurring-templates', (req: Request, res: Response) => {
     data.subcategory_id ?? null,
     data.day_of_month,
     data.status,
-    data.carry_over
+    data.carry_over,
+    data.end_month_year ?? null
   );
 
   const created = db.prepare('SELECT * FROM recurring_templates WHERE id = ?').get(id);
@@ -603,4 +600,131 @@ apiRouter.get('/backup/export/db', (_req: Request, res: Response) => {
 
   const filename = `budget_backup_${new Date().toISOString().substring(0, 10)}.sqlite`;
   res.download(dbPath, filename);
+});
+
+// ==========================================
+// 7. ASSISTANT DE PREMIÈRE CONNEXION (ONBOARDING)
+// ==========================================
+
+const onboardingCompleteSchema = z.object({
+  profile: z.object({
+    adults_count: z.number().int().min(1).default(1),
+    children_count: z.number().int().min(0).default(0),
+    pets_count: z.number().int().min(0).default(0),
+    housing_status: z.enum(['TENANT', 'OWNER_WITH_LOAN', 'OWNER_PAID_OFF', 'FREE_HOUSING']),
+    payday_default: z.number().int().min(1).max(31).default(1),
+  }),
+  templates: z.array(
+    z.object({
+      title: z.string().min(1),
+      amount: z.number().positive(),
+      type: z.enum(['INCOME', 'RECURRING_EXPENSE', 'CURRENT_EXPENSE']),
+      category_id: z.string().min(1),
+      subcategory_id: z.string().nullable().optional(),
+      subcategory_name: z.string().optional(), // Si nouvelle sous-catégorie créée à la volée
+      day_of_month: z.number().int().min(1).max(31).default(1),
+      end_month_year: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
+      carry_over: z.number().int().default(1),
+    })
+  ),
+  current_month_year: z.string().regex(/^\d{4}-\d{2}$/),
+});
+
+/**
+ * Récupère le profil du foyer et l'état d'onboarding
+ */
+apiRouter.get('/onboarding/status', (_req: Request, res: Response) => {
+  const profile = db.prepare('SELECT * FROM household_profile WHERE id = 1').get() as any;
+  if (!profile) {
+    res.json({ has_completed_onboarding: 0 });
+    return;
+  }
+  res.json(profile);
+});
+
+/**
+ * Validation finale et enregistrement de l'assistant de première connexion
+ */
+apiRouter.post('/onboarding/complete', (req: Request, res: Response) => {
+  const parse = onboardingCompleteSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Données invalides', details: parse.error.format() });
+    return;
+  }
+
+  const { profile, templates, current_month_year } = parse.data;
+
+  const completeTx = db.transaction(() => {
+    // 1. Sauvegarder ou mettre à jour household_profile
+    db.prepare(`
+      INSERT INTO household_profile (
+        id, has_completed_onboarding, adults_count, children_count, pets_count, housing_status, payday_default, updated_at
+      ) VALUES (1, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        has_completed_onboarding = 1,
+        adults_count = excluded.adults_count,
+        children_count = excluded.children_count,
+        pets_count = excluded.pets_count,
+        housing_status = excluded.housing_status,
+        payday_default = excluded.payday_default,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(
+      profile.adults_count,
+      profile.children_count,
+      profile.pets_count,
+      profile.housing_status,
+      profile.payday_default
+    );
+
+    // 2. Insérer tous les templates récurrents
+    for (const tpl of templates) {
+      let subId = tpl.subcategory_id ?? null;
+
+      // Si un nom de sous-catégorie personnalisé a été fourni sans ID
+      if (!subId && tpl.subcategory_name && tpl.subcategory_name.trim()) {
+        const existingSub = db
+          .prepare('SELECT id FROM subcategories WHERE category_id = ? AND LOWER(name) = LOWER(?)')
+          .get(tpl.category_id, tpl.subcategory_name.trim()) as { id: string } | undefined;
+
+        if (existingSub) {
+          subId = existingSub.id;
+        } else {
+          subId = crypto.randomUUID();
+          db.prepare('INSERT INTO subcategories (id, category_id, name) VALUES (?, ?, ?)').run(
+            subId,
+            tpl.category_id,
+            tpl.subcategory_name.trim()
+          );
+        }
+      }
+
+      const templateId = crypto.randomUUID();
+      db.prepare(`
+        INSERT INTO recurring_templates (
+          id, title, amount, type, category_id, subcategory_id, day_of_month, status, carry_over, end_month_year
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+      `).run(
+        templateId,
+        tpl.title,
+        tpl.amount,
+        tpl.type,
+        tpl.category_id,
+        subId,
+        tpl.day_of_month,
+        tpl.carry_over,
+        tpl.end_month_year ?? null
+      );
+    }
+
+    // 3. Initialiser ou synchroniser immédiatement le mois courant
+    rolloverService.initializeOrSyncMonth(current_month_year, false);
+  });
+
+  try {
+    completeTx();
+    res.json({ success: true, message: 'Onboarding terminé avec succès !' });
+  } catch (err: any) {
+    console.error("Erreur onboarding complete:", err);
+    res.status(500).json({ error: err.message || "Erreur lors de l'enregistrement de l'onboarding" });
+  }
 });

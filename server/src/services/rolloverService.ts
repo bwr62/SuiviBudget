@@ -72,14 +72,16 @@ export class RolloverEngine {
       }
 
       // B. Récupérer tous les modèles qui doivent se répéter (carry_over = 1)
+      // et dont la date de fin n'est pas échue (end_month_year IS NULL OR end_month_year >= monthYear)
       // Note : Les dépenses imprévues (UNFORESEEN_EXPENSE) ne sont JAMAIS dans recurring_templates.
       const templates = this.database
         .prepare(`
-          SELECT id, title, amount, type, category_id, subcategory_id, day_of_month, status
+          SELECT id, title, amount, type, category_id, subcategory_id, day_of_month, status, end_month_year
           FROM recurring_templates
           WHERE carry_over = 1
+            AND (end_month_year IS NULL OR end_month_year >= ?)
         `)
-        .all() as Array<{
+        .all(monthYear) as Array<{
           id: string;
           title: string;
           amount: number;
@@ -88,6 +90,7 @@ export class RolloverEngine {
           subcategory_id: string | null;
           day_of_month: number;
           status: 'ACTIVE' | 'PENDING_PAUSED';
+          end_month_year: string | null;
         }>;
 
       const insertTxStmt = this.database.prepare(`
@@ -119,6 +122,123 @@ export class RolloverEngine {
     });
 
     syncTransaction();
+  }
+
+  /**
+   * 1.B PROPAGATION TEMPORELLE & MODIFICATION AVEC PORTÉE (SCOPE)
+   * Loi d'intégrité historique : JAMAIS de modification sur les mois passés (< currentMonthYear).
+   */
+  public updateTransactionWithScope(params: {
+    transactionId: string;
+    data: {
+      amount?: number;
+      title?: string;
+      category_id?: string;
+      subcategory_id?: string | null;
+      date?: string;
+      notes?: string | null;
+    };
+    scope: 'CURRENT_MONTH_ONLY' | 'CURRENT_AND_FUTURE';
+  }): { updatedTxId: string; templateUpdated: boolean; futureCount: number } {
+    const { transactionId, data, scope } = params;
+
+    let templateUpdated = false;
+    let futureCount = 0;
+
+    const runScopedUpdate = this.database.transaction(() => {
+      const currentTx = this.database
+        .prepare('SELECT * FROM transactions WHERE id = ?')
+        .get(transactionId) as any;
+
+      if (!currentTx) {
+        throw new Error(`Transaction introuvable: ${transactionId}`);
+      }
+
+      // 1. Mettre à jour la transaction du mois courant M
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      for (const [key, val] of Object.entries(data)) {
+        if (val !== undefined) {
+          updates.push(`${key} = ?`);
+          values.push(val);
+        }
+      }
+
+      if (data.date && !('month_year' in data)) {
+        updates.push('month_year = ?');
+        values.push(data.date.substring(0, 7));
+      }
+
+      if (updates.length > 0) {
+        values.push(transactionId);
+        this.database
+          .prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`)
+          .run(...values);
+      }
+
+      // 2. Si portée = CURRENT_AND_FUTURE et rattaché à un recurring_template
+      if (scope === 'CURRENT_AND_FUTURE' && currentTx.template_id) {
+        const tplUpdates: string[] = [];
+        const tplValues: any[] = [];
+
+        if (data.amount !== undefined) {
+          tplUpdates.push('amount = ?');
+          tplValues.push(data.amount);
+        }
+        if (data.title !== undefined) {
+          tplUpdates.push('title = ?');
+          tplValues.push(data.title);
+        }
+        if (data.category_id !== undefined) {
+          tplUpdates.push('category_id = ?');
+          tplValues.push(data.category_id);
+        }
+        if (data.subcategory_id !== undefined) {
+          tplUpdates.push('subcategory_id = ?');
+          tplValues.push(data.subcategory_id);
+        }
+
+        if (tplUpdates.length > 0) {
+          tplValues.push(currentTx.template_id);
+          this.database
+            .prepare(`UPDATE recurring_templates SET ${tplUpdates.join(', ')} WHERE id = ?`)
+            .run(...tplValues);
+          templateUpdated = true;
+        }
+
+        // Mettre à jour les transactions pré-générées STRICTEMENT sur les mois futurs (>= currentMonthYear)
+        // LOI D'INTÉGRITÉ : On ne touche jamais aux mois passés (< currentTx.month_year)
+        const futureUpdates: string[] = [];
+        const futureValues: any[] = [];
+
+        if (data.amount !== undefined) {
+          futureUpdates.push('amount = ?');
+          futureValues.push(data.amount);
+        }
+        if (data.title !== undefined) {
+          futureUpdates.push('title = ?');
+          futureValues.push(data.title);
+        }
+
+        if (futureUpdates.length > 0) {
+          futureValues.push(currentTx.template_id);
+          futureValues.push(currentTx.month_year);
+
+          const result = this.database
+            .prepare(`
+              UPDATE transactions 
+              SET ${futureUpdates.join(', ')}
+              WHERE template_id = ? AND month_year >= ?
+            `)
+            .run(...futureValues);
+          futureCount = result.changes;
+        }
+      }
+    });
+
+    runScopedUpdate();
+    return { updatedTxId: transactionId, templateUpdated, futureCount };
   }
 
   /**

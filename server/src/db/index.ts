@@ -22,6 +22,22 @@ db.pragma('synchronous = NORMAL');
  */
 export function initDatabase(): void {
   db.exec(DDL_SCHEMA);
+
+  // Migration idempotente: s'assurer de la présence de la colonne end_month_year
+  const tableInfo = db.prepare("PRAGMA table_info(recurring_templates)").all() as Array<{ name: string }>;
+  const hasEndMonthYear = tableInfo.some((col) => col.name === 'end_month_year');
+  if (!hasEndMonthYear) {
+    db.exec("ALTER TABLE recurring_templates ADD COLUMN end_month_year TEXT;");
+  }
+
+  // Initialisation du singleton household_profile s'il n'existe pas
+  const profile = db.prepare("SELECT id FROM household_profile WHERE id = 1").get();
+  if (!profile) {
+    db.prepare(`
+      INSERT INTO household_profile (id, has_completed_onboarding, adults_count, children_count, pets_count, housing_status, payday_default)
+      VALUES (1, 0, 1, 0, 0, 'TENANT', 1)
+    `).run();
+  }
 }
 
 // Initialisation automatique à l'import

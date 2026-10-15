@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Plus, ToggleLeft, ToggleRight, Trash2, Calendar, Tag, Search, AlertCircle, X } from 'lucide-react';
+import { Plus, ToggleLeft, ToggleRight, Trash2, Calendar, Tag, Search, AlertCircle, X, Edit2, Check } from 'lucide-react';
 import { Transaction, Category, OperationType } from '../types';
+import { UpdateScopeModal } from './UpdateScopeModal';
 
 interface TransactionsTableViewProps {
   title: string;
@@ -9,6 +10,7 @@ interface TransactionsTableViewProps {
   categories: Category[];
   currentMonthYear: string;
   onAddTransaction: (data: Partial<Transaction>) => Promise<void>;
+  onUpdateTransaction?: (id: string, data: Partial<Transaction>, scope?: 'CURRENT_MONTH_ONLY' | 'CURRENT_AND_FUTURE') => Promise<void>;
   onToggleStatus: (id: string, newStatus: 'ACTIVE' | 'PENDING', stopRepetitions?: boolean) => Promise<void>;
   onDeleteTransaction: (id: string) => Promise<void>;
 }
@@ -20,6 +22,7 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
   categories,
   currentMonthYear,
   onAddTransaction,
+  onUpdateTransaction,
   onToggleStatus,
   onDeleteTransaction,
 }) => {
@@ -34,10 +37,67 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
 
+  // Édition en ligne d'une transaction
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+
+  // Modale de choix de portée pour opérations récurrentes
+  const [pendingScopeUpdate, setPendingScopeUpdate] = useState<{
+    tx: Transaction;
+    newAmount: number;
+    newTitle: string;
+  } | null>(null);
+
   // Synchroniser la date par défaut lorsque le mois change
   React.useEffect(() => {
     setFormDate(`${currentMonthYear}-01`);
   }, [currentMonthYear]);
+
+  const handleStartEdit = (tx: Transaction) => {
+    setEditingTxId(tx.id);
+    setEditTitle(tx.title);
+    setEditAmount(tx.amount.toString());
+  };
+
+  const handleSaveEdit = async (tx: Transaction) => {
+    const numAmount = parseFloat(editAmount);
+    if (!editTitle.trim() || isNaN(numAmount) || numAmount <= 0) {
+      setEditingTxId(null);
+      return;
+    }
+
+    // Cas B : La transaction est issue d'un template récurrent
+    if (tx.template_id && onUpdateTransaction) {
+      setEditingTxId(null);
+      setPendingScopeUpdate({
+        tx,
+        newAmount: numAmount,
+        newTitle: editTitle.trim(),
+      });
+      return;
+    }
+
+    // Cas A : La transaction est ponctuelle ou imprévue (template_id IS NULL)
+    if (onUpdateTransaction) {
+      await onUpdateTransaction(tx.id, {
+        title: editTitle.trim(),
+        amount: numAmount,
+      }, 'CURRENT_MONTH_ONLY');
+    }
+    setEditingTxId(null);
+  };
+
+  const handleConfirmScope = async (scope: 'CURRENT_MONTH_ONLY' | 'CURRENT_AND_FUTURE') => {
+    if (!pendingScopeUpdate || !onUpdateTransaction) return;
+    const { tx, newAmount, newTitle } = pendingScopeUpdate;
+    setPendingScopeUpdate(null);
+
+    await onUpdateTransaction(tx.id, {
+      title: newTitle,
+      amount: newAmount,
+    }, scope);
+  };
 
   // Filtrer les transactions selon le type de la vue et la recherche textuelle
   const filteredTransactions = transactions
@@ -299,14 +359,26 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
                     </td>
 
                     <td className="px-4 py-3 font-medium text-slate-200">
-                      <div>
-                        <span>{tx.title}</span>
-                        {tx.is_carried_over === 1 && (
-                          <span className="ml-2 inline-block px-1.5 py-0.2 bg-blue-500/10 text-blue-400 text-[10px] rounded border border-blue-500/20">
-                            Répété
-                          </span>
-                        )}
-                      </div>
+                      {editingTxId === tx.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            className="bg-slate-800 border border-indigo-500 rounded px-2 py-0.5 text-xs text-slate-100 w-full outline-none"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span>{tx.title}</span>
+                          {tx.is_carried_over === 1 && (
+                            <span className="inline-block px-1.5 py-0.2 bg-blue-500/10 text-blue-400 text-[10px] rounded border border-blue-500/20">
+                              Répété
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     <td className="px-4 py-3 text-slate-400">
@@ -335,21 +407,58 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
                     </td>
 
                     <td className="px-4 py-3 text-right font-mono font-semibold whitespace-nowrap">
-                      <span
-                        className={
-                          isPending
-                            ? 'text-slate-500 line-through'
-                            : tx.type === 'INCOME'
-                            ? 'text-emerald-400'
-                            : 'text-slate-100'
-                        }
-                      >
-                        {tx.type === 'INCOME' ? '+' : '-'}{tx.amount.toFixed(2)} €
-                      </span>
+                      {editingTxId === tx.id ? (
+                        <input
+                          type="number"
+                          step="any"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                          className="w-24 bg-slate-800 border border-indigo-500 rounded px-2 py-0.5 text-xs text-right font-mono text-slate-100 outline-none"
+                        />
+                      ) : (
+                        <span
+                          className={
+                            isPending
+                              ? 'text-slate-500 line-through'
+                              : tx.type === 'INCOME'
+                              ? 'text-emerald-400'
+                              : 'text-slate-100'
+                          }
+                        >
+                          {tx.type === 'INCOME' ? '+' : '-'}{tx.amount.toFixed(2)} €
+                        </span>
+                      )}
                     </td>
 
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {editingTxId === tx.id ? (
+                          <>
+                            <button
+                              onClick={() => handleSaveEdit(tx)}
+                              title="Enregistrer"
+                              className="p-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 rounded transition-colors"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setEditingTxId(null)}
+                              title="Annuler"
+                              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : onUpdateTransaction ? (
+                          <button
+                            onClick={() => handleStartEdit(tx)}
+                            title="Modifier montant ou libellé"
+                            className="p-1 text-slate-400 hover:text-indigo-300 hover:bg-slate-800 rounded transition-colors"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
+
                         {/* Switch Actif / En attente */}
                         <button
                           onClick={() =>
@@ -432,6 +541,19 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modale de portée temporelle pour modification d'une récurrence */}
+      {pendingScopeUpdate && (
+        <UpdateScopeModal
+          isOpen={true}
+          transactionTitle={pendingScopeUpdate.tx.title}
+          currentMonthYear={currentMonthYear}
+          oldAmount={pendingScopeUpdate.tx.amount}
+          newAmount={pendingScopeUpdate.newAmount}
+          onConfirm={handleConfirmScope}
+          onCancel={() => setPendingScopeUpdate(null)}
+        />
       )}
     </div>
   );

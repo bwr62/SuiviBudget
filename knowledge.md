@@ -16,7 +16,7 @@
 ---
 
 ## 2. ARCHITECTURE & STACK TECHNIQUE
-* **Version du projet** : `v0.03`
+* **Version du projet** : `v0.04`
 * **Architecture** : Monorepo npm avec workspaces (`server`, `client`).
 * **Frontend** : React 19, Vite 8, TypeScript strict (`ES2022`, `bundler`), Tailwind CSS (v4 via `@tailwindcss/vite`), Zustand, TanStack Query, Recharts, Lucide React, SimpleWebAuthn Browser (`Port: 5173`, proxy configuré vers `http://localhost:3001/api`).
 * **Backend** : Node.js (v26), Express, TypeScript strict (`ES2022`, `NodeNext`), Zod, SimpleWebAuthn Server, Argon2id, JWT (vérification stricte de secret >= 32 chars au démarrage), Helmet, CORS verrouillé, Cookie-parser, Express Rate Limit (`Port: 3001`).
@@ -57,6 +57,9 @@
 | `client/src/components/MonthHeader.tsx` | En-tête de sélection de mois et toggle de report M-1 | `MonthHeader` | `client/src/store/useUIStore.ts` | Actif |
 | `client/src/components/DashboardView.tsx` | Tableau de bord avec 4 KPIs et jauge budgétaire | `DashboardView` | `client/src/types/index.ts` | Actif |
 | `client/src/components/TransactionsTableView.tsx` | Tableaux dynamiques avec case à cocher récurrence et bascule PENDING | `TransactionsTableView` | `client/src/types/index.ts` | Actif |
+| `client/src/components/OnboardingWizard.tsx` | Assistant de première connexion en 6 étapes (Foyer, Revenus, Logement, Crédits, Charges, Bilan) | `OnboardingWizard` | `client/src/types/index.ts` | Actif |
+| `client/src/components/UpdateScopeModal.tsx` | Boîte de dialogue de choix de portée temporelle (Mois courant vs Mois courant + Futurs) | `UpdateScopeModal` | - | Actif |
+| `server/src/db/verifyPropagation.ts` | Test automatisé de propagation temporelle et d'extinction de prêt | Script de validation | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
 | `client/src/components/CategoriesView.tsx` | Gestion complète : modification catégorie/sous-catégorie & ajout | `CategoriesView` | `client/src/types/index.ts` | Actif |
 | `client/src/components/AnalyticsView.tsx` | Graphiques Recharts annuels et répartition catégories | `AnalyticsView` | `client/src/types/index.ts` | Actif |
 | `client/src/components/AuthModal.tsx` | Modal WebAuthn Passkeys et déverrouillage de secours | `AuthModal` | `@simplewebauthn/browser` | Actif |
@@ -70,9 +73,11 @@
 * **Tables actives** :
   * `users` : Comptes utilisateurs (`id`, `username`, `recovery_hash`, `created_at`).
   * `passkeys` : Clés publiques WebAuthn (`credential_id`, `user_id`, `public_key`, `counter`, `transports`).
+  * `auth_challenges` : Stockage SQLite temporaire des challenges FIDO2 avec TTL de 5 minutes.
+  * `household_profile` : Profil singleton (`id = 1`) stockant la composition du foyer (`adults_count`, `children_count`, `pets_count`), le statut de logement (`housing_status`), le jour de paie par défaut (`payday_default`) et l'indicateur `has_completed_onboarding`.
   * `categories` : Catégories système et personnalisées (`id`, `name`, `type`, `icon`, `color`, `is_system`, `is_active`).
   * `subcategories` : Sous-catégories avec cascade FK.
-  * `recurring_templates` : Modèles d'opérations récurrentes (`carry_over`, `day_of_month`, `status`).
+  * `recurring_templates` : Modèles d'opérations récurrentes (`carry_over`, `day_of_month`, `status`, et `end_month_year` pour extinction programmée).
   * `transactions` : Instances réelles mensuelles (`status` ACTIVE / PENDING, `is_carried_over`, `month_year` dérivé de `date`).
   * `monthly_balances` : Reliquat et clôtures mensuelles (`carried_over_from_previous`).
 * **Index de performance & intégrité** :
@@ -124,6 +129,8 @@
 | `POST` | `/api/categories/:id/subcategories` | Oui | **NOUVEAU** : Ajout d'une sous-catégorie à une catégorie existante |
 | `PATCH` | `/api/subcategories/:id` | Oui | **NOUVEAU** : Renommage d'une sous-catégorie |
 | `DELETE`| `/api/subcategories/:id` | Oui | **NOUVEAU** : Suppression d'une sous-catégorie |
+| `GET` | `/api/onboarding/status` | Oui | **NOUVEAU** : État d'avancement de l'onboarding et profil du foyer |
+| `POST` | `/api/onboarding/complete` | Oui | **NOUVEAU** : Finalisation de l'onboarding et génération initiale du budget |
 | `GET` | `/api/backup/export/json` | Oui | **P1** : Sauvegarde et export complet des données au format JSON |
 | `GET` | `/api/backup/export/db` | Oui | **P1** : Téléchargement du fichier de base de données SQLite brut |
 | `GET` | `/api/stats/annual` | Oui | Statistiques annuelles (hors PENDING) |
@@ -132,6 +139,28 @@
 ---
 
 ## 7. JOURNAL DES MODIFICATIONS (CHANGELOG D'AUDIT)
+
+### [Version 0.04] - 2026-10-15
+* **Assistant de Première Connexion (Onboarding Wizard) en 6 Étapes** :
+  * Création de la table `household_profile` (singleton `id = 1`) pour mémoriser les adultes, enfants, animaux, statut d'habitation et jour de paie par défaut.
+  * Création du composant plein écran interactif `client/src/components/OnboardingWizard.tsx` :
+    * Étape 1 : Composition du foyer (compteurs interactifs, jour de paie).
+    * Étape 2 : Rentrées d'argent dynamiques selon le nombre d'adultes et pré-sélection d'aides/CAF.
+    * Étape 3 : Logement et crédits immobiliers multiples (PTZ, assurance emprunteur séparée, copro, taxe foncière).
+    * Étape 4 : Autres crédits & remboursements avec saisie de la date d'extinction (`end_month_year`).
+    * Étape 5 : Charges habituelles (énergie, télécoms, assurances, enfants, abonnements).
+    * Étape 6 : Synthèse financière en temps réel (Revenus, Charges fixes, Reste à vivre estimé) et validation en une transaction atomique.
+* **Extinction Automatique des Crédits & Abonnements** :
+  * Ajout de la colonne `end_month_year` (`YYYY-MM`) sur `recurring_templates`.
+  * Modification du `RolloverEngine` : un modèle n'est dupliqué sur le mois `M` que si `end_month_year IS NULL OR end_month_year >= M`. Dès que `M` dépasse la date d'échéance, la ligne cesse de se générer automatiquement.
+* **Règle de Propagation Temporelle & Garantie d'Intégrité Historique** :
+  * Implémentation de `updateTransactionWithScope(transactionId, data, scope)` dans `RolloverEngine` et intégration dans la route `PATCH /api/transactions/:id`.
+  * Intégration du composant `UpdateScopeModal.tsx` lors de l'édition d'une opération récurrente :
+    * Choix 1 : *Modifier uniquement pour ce mois (`M`)* -> met à jour uniquement la ligne du mois sans altérer le modèle.
+    * Choix 2 : *Modifier pour ce mois (`M`) ET tous les mois à venir (`>= M`)* -> met à jour le modèle et exécute `UPDATE transactions WHERE template_id = @id AND month_year >= @M`.
+    * **Garantie SQL** : Les mois passés (`< M`) ne sont jamais altérés, préservant l'intégrité comptable historique.
+* **Validation par Test Automatisé** :
+  * Création et exécution avec succès du script de test `server/src/db/verifyPropagation.ts`.
 
 ### [Version 0.03] - 2026-10-15
 * **Mise en œuvre des Recommandations d'Audit Prioritaires (P1 à P4)** :
