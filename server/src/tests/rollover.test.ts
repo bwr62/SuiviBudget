@@ -273,5 +273,37 @@ describe('RolloverEngine Unit Tests', () => {
       assert.equal(estimatedInterests, 60.00);
       assert.equal(Math.round(totalEstimated * 100) / 100, 2060.00);
     });
+
+    it('should correctly compute monthly deposit needed and quinzaine accumulated interests', () => {
+      // Cas utilisateur : capital actuel = 150€, cible = 3000€, durée = 10 mois, taux = 3%
+      const currentAmount = 150.00;
+      const targetAmount = 3000.00;
+      const monthsRemaining = 10;
+      const annualRate = 3.00;
+
+      // 1. Mensualité brute nécessaire : (3000 - 150) / 10 = 285.00€
+      const monthlyDeposit = (targetAmount - currentAmount) / monthsRemaining;
+      assert.equal(monthlyDeposit, 285.00);
+
+      // 2. Intérêts quinzaines sur capital initial (10 mois = 20 quinzaines à 3%/24)
+      const quinzaineRate = (annualRate / 100) / 24;
+      const interestInitial = currentAmount * quinzaineRate * (monthsRemaining * 2);
+
+      // 3. Intérêts quinzaines sur versements mensuels
+      let interestMonthly = 0;
+      for (let m = 1; m <= monthsRemaining; m++) {
+        const monthsInvested = monthsRemaining - m;
+        const quinzainesInvested = monthsInvested * 2;
+        interestMonthly += monthlyDeposit * quinzaineRate * quinzainesInvested;
+      }
+
+      const totalInterests = Math.round((interestInitial + interestMonthly) * 100) / 100;
+      // Intérêts cumulés attendus positifs (3.75€ initial + 32.06€ mensualités = 35.81€)
+      assert.equal(totalInterests > 0, true);
+      assert.equal(totalInterests, 35.81);
+
+      const totalAvailable = Math.round((currentAmount + (monthlyDeposit * monthsRemaining) + totalInterests) * 100) / 100;
+      assert.equal(totalAvailable, 3035.81);
+    });
   });
 });

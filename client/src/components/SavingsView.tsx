@@ -27,35 +27,94 @@ function getMonthsDiff(startMonthYear: string, endMonthYear: string): number {
   return Math.max(0, (endY - startY) * 12 + (endM - startM));
 }
 
+export interface SavingsScheduleResult {
+  monthsRemaining: number;
+  monthlyDepositNeeded: number; // Montant brut à épargner chaque mois (ex: 285€)
+  totalDeposited: number; // Total du capital versé (initial + mensualités)
+  estimatedInterests: number; // Intérêts nets cumulés sur le capital initial et versements mensuels
+  totalAtTarget: number; // Capital total disponible à l'échéance (versements + intérêts)
+  interestOnInitial: number;
+  interestOnMonthlyDeposits: number;
+}
+
 /**
- * Calcule les intérêts composés prévisionnels en fonction du montant actuel,
- * du taux net annuel et de la date de fin estimée (en mois).
+ * Calcule l'échéancier d'épargne officiel :
+ * 1. Détermine la mensualité brute nécessaire pour combler l'écart entre le capital actuel et la cible :
+ *    mensualité = (Cible - Capital initial) / mois restants (ex: (3000 - 150) / 10 = 285 €/mois)
+ * 2. Calcule les intérêts cumulés selon les règles officielles des livrets d'épargne (règle des quinzaines / capitalisation annuelle) :
+ *    - Intérêts générés par le capital initial placé sur toute la durée
+ *    - Intérêts générés progressivement par les versements mensuels (24 quinzaines par an)
  */
-export function calculateEstimatedInterests(
+export function calculateSavingsSchedule(
   currentAmount: number,
+  targetAmount: number,
   annualRateNetPercent: number | null | undefined,
   currentMonthYear: string,
   targetDateMonthYear: string | null | undefined
-): { monthsRemaining: number; estimatedInterests: number; totalEstimated: number } {
-  if (!annualRateNetPercent || annualRateNetPercent <= 0 || !targetDateMonthYear) {
-    return { monthsRemaining: 0, estimatedInterests: 0, totalEstimated: currentAmount };
+): SavingsScheduleResult {
+  const monthsRemaining = targetDateMonthYear ? getMonthsDiff(currentMonthYear, targetDateMonthYear) : 0;
+  const remainingCapitalToSave = Math.max(0, targetAmount - currentAmount);
+
+  // Si pas de mois restants, mensualité = reste à charge total en un coup
+  const monthlyDepositNeeded = monthsRemaining > 0 
+    ? Math.round((remainingCapitalToSave / monthsRemaining) * 100) / 100 
+    : remainingCapitalToSave;
+
+  const totalDeposited = Math.round((currentAmount + (monthlyDepositNeeded * monthsRemaining)) * 100) / 100;
+
+  if (!annualRateNetPercent || annualRateNetPercent <= 0 || monthsRemaining <= 0) {
+    return {
+      monthsRemaining,
+      monthlyDepositNeeded,
+      totalDeposited,
+      estimatedInterests: 0,
+      totalAtTarget: totalDeposited,
+      interestOnInitial: 0,
+      interestOnMonthlyDeposits: 0,
+    };
   }
 
-  const monthsRemaining = getMonthsDiff(currentMonthYear, targetDateMonthYear);
-  if (monthsRemaining <= 0 || currentAmount <= 0) {
-    return { monthsRemaining, estimatedInterests: 0, totalEstimated: currentAmount };
-  }
-
-  const years = monthsRemaining / 12;
   const rateDecimal = annualRateNetPercent / 100;
-  // Intérêts composés annuels : A = P * (1 + r)^t
-  const totalEstimated = currentAmount * Math.pow(1 + rateDecimal, years);
-  const estimatedInterests = Math.max(0, totalEstimated - currentAmount);
+  const quinzaineRate = rateDecimal / 24; // Règle officielle des 24 quinzaines par an
+
+  // 1. Intérêts cumulés sur le capital initial (présent sur 2 * monthsRemaining quinzaines)
+  // Règle Livret : Capitalisation annuelle au 31 décembre
+  let simInitial = currentAmount;
+  let accumulatedInterestInitial = 0;
+  for (let m = 1; m <= monthsRemaining; m++) {
+    // 2 quinzaines par mois
+    accumulatedInterestInitial += simInitial * (quinzaineRate * 2);
+    // Capitalisation au bout de chaque tranche de 12 mois
+    if (m % 12 === 0) {
+      simInitial += accumulatedInterestInitial;
+      accumulatedInterestInitial = 0;
+    }
+  }
+  const interestOnInitial = (simInitial - currentAmount) + accumulatedInterestInitial;
+
+  // 2. Intérêts cumulés sur les versements mensuels réguliers
+  // Chaque versement de début de mois produit des intérêts à partir de la 1ère quinzaine suivante (en moyenne ~2 quinzaines par mois restant)
+  let simMonthlyDepositsTotal = 0;
+  let simMonthlyInterest = 0;
+  for (let m = 1; m <= monthsRemaining; m++) {
+    // Versement effectué au mois m
+    const monthsInvested = monthsRemaining - m;
+    const quinzainesInvested = Math.max(0, monthsInvested * 2);
+    simMonthlyDepositsTotal += monthlyDepositNeeded;
+    simMonthlyInterest += monthlyDepositNeeded * quinzaineRate * quinzainesInvested;
+  }
+
+  const totalEstimatedInterests = Math.round((interestOnInitial + simMonthlyInterest) * 100) / 100;
+  const totalAtTarget = Math.round((totalDeposited + totalEstimatedInterests) * 100) / 100;
 
   return {
     monthsRemaining,
-    estimatedInterests: Math.round(estimatedInterests * 100) / 100,
-    totalEstimated: Math.round(totalEstimated * 100) / 100,
+    monthlyDepositNeeded,
+    totalDeposited,
+    estimatedInterests: totalEstimatedInterests,
+    totalAtTarget,
+    interestOnInitial: Math.round(interestOnInitial * 100) / 100,
+    interestOnMonthlyDeposits: Math.round(simMonthlyInterest * 100) / 100,
   };
 }
 
@@ -277,8 +336,9 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
           {goals.map((goal) => {
             const pct = Math.min(100, Math.round((goal.current_amount / goal.target_amount) * 100));
             const isCompleted = goal.current_amount >= goal.target_amount;
-            const interestInfo = calculateEstimatedInterests(
+            const schedule = calculateSavingsSchedule(
               goal.current_amount,
+              goal.target_amount,
               goal.interest_rate,
               currentMonthYear,
               goal.target_date
@@ -303,7 +363,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                         {goal.target_date && (
                           <div className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            <span>Objectif {goal.target_date}</span>
+                            <span>Échéance {goal.target_date}</span>
                           </div>
                         )}
                         {goal.interest_rate !== undefined && goal.interest_rate !== null && goal.interest_rate > 0 && (
@@ -359,24 +419,40 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                   </div>
                 </div>
 
-                {/* Bloc Calcul Intérêts Estimés */}
-                {goal.interest_rate && goal.interest_rate > 0 && goal.target_date && (
-                  <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] space-y-1">
-                    <div className="flex items-center justify-between text-slate-300 font-medium">
-                      <span className="flex items-center gap-1 text-emerald-400">
-                        <TrendingUp className="w-3 h-3" />
-                        <span>Intérêts nets estimés :</span>
-                      </span>
-                      <span className="font-mono font-bold text-emerald-400">
-                        +{interestInfo.estimatedInterests.toFixed(2)} €
+                {/* Bloc Effort d'Épargne Mensuel & Intérêts Cumulés */}
+                {goal.target_date && !isCompleted && (
+                  <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] space-y-1.5">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span className="text-slate-400">À épargner par mois :</span>
+                      <span className="font-mono font-bold text-emerald-400 text-xs">
+                        {schedule.monthlyDepositNeeded.toFixed(2)} € / mois
                       </span>
                     </div>
+
                     <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                      <span>Capital à terme ({interestInfo.monthsRemaining} mois) :</span>
-                      <span className="font-mono text-slate-200 font-semibold">
-                        {interestInfo.totalEstimated.toFixed(2)} €
-                      </span>
+                      <span>Durée restante :</span>
+                      <span className="font-mono text-slate-300">{schedule.monthsRemaining} mois</span>
                     </div>
+
+                    {goal.interest_rate !== undefined && goal.interest_rate !== null && goal.interest_rate > 0 && (
+                      <div className="pt-1 border-t border-slate-800/80 space-y-1 text-[10px]">
+                        <div className="flex items-center justify-between text-emerald-400 font-medium">
+                          <span className="flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            <span>Intérêts cumulés estimés :</span>
+                          </span>
+                          <span className="font-mono font-bold">
+                            +{schedule.estimatedInterests.toFixed(2)} €
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-400">
+                          <span>Capital final disponible :</span>
+                          <span className="font-mono text-slate-200 font-semibold">
+                            {schedule.totalAtTarget.toFixed(2)} €
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -392,7 +468,12 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                   <button
                     onClick={() => {
                       setSelectedGoalForAlloc(goal);
-                      setAllocAmount(remainingSavingsCapacity > 0 ? String(remainingSavingsCapacity) : '50');
+                      // Propose automatiquement le montant mensuel recommandé ou la capacité restante
+                      const recommended = schedule.monthsRemaining > 0 ? schedule.monthlyDepositNeeded : (goal.target_amount - goal.current_amount);
+                      const defaultAlloc = remainingSavingsCapacity > 0 
+                        ? Math.min(remainingSavingsCapacity, recommended) 
+                        : recommended;
+                      setAllocAmount(String(defaultAlloc.toFixed(2)));
                     }}
                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition"
                   >
@@ -437,7 +518,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                     step="0.01"
                     min="1"
                     required
-                    placeholder="Ex: 2000"
+                    placeholder="Ex: 3000"
                     value={targetAmount}
                     onChange={(e) => setTargetAmount(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
@@ -449,7 +530,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                     type="number"
                     step="0.01"
                     min="0"
-                    placeholder="Ex: 500"
+                    placeholder="Ex: 150"
                     value={initialAmount}
                     onChange={(e) => setInitialAmount(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
@@ -482,25 +563,44 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                 </div>
               </div>
 
-              {/* Aperçu en direct des intérêts dans la modale */}
+              {/* Aperçu en direct de la simulation dans la modale */}
               {(() => {
-                const parsedRate = parseFloat(interestRate.replace(',', '.'));
-                const parsedAmount = parseFloat(initialAmount.replace(',', '.'));
-                if (parsedRate > 0 && parsedAmount > 0 && targetDate) {
-                  const preview = calculateEstimatedInterests(parsedAmount, parsedRate, currentMonthYear, targetDate);
+                const parsedTarget = parseFloat(targetAmount.replace(',', '.'));
+                const parsedCurrent = initialAmount ? parseFloat(initialAmount.replace(',', '.')) : 0;
+                const parsedRate = interestRate ? parseFloat(interestRate.replace(',', '.')) : 0;
+                if (parsedTarget > 0 && targetDate) {
+                  const schedule = calculateSavingsSchedule(parsedCurrent, parsedTarget, parsedRate, currentMonthYear, targetDate);
                   return (
-                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] space-y-1 text-emerald-300">
+                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] space-y-1.5 text-emerald-300">
                       <div className="flex items-center justify-between font-semibold">
-                        <span className="flex items-center gap-1">
-                          <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Simulation d'intérêts ({preview.monthsRemaining} mois) :</span>
+                        <span>Épargne mensuelle nécessaire :</span>
+                        <span className="font-mono text-emerald-400 text-sm font-bold">
+                          {schedule.monthlyDepositNeeded.toFixed(2)} € / mois
                         </span>
-                        <span className="font-mono text-emerald-400 font-bold">+{preview.estimatedInterests.toFixed(2)} €</span>
                       </div>
                       <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                        <span>Capital prévisionnel à terme :</span>
-                        <span className="font-mono text-slate-200">{preview.totalEstimated.toFixed(2)} €</span>
+                        <span>Horizon de placement :</span>
+                        <span className="font-mono text-slate-200">{schedule.monthsRemaining} mois</span>
                       </div>
+                      {parsedRate > 0 && (
+                        <div className="pt-1.5 border-t border-emerald-500/20 space-y-1 text-[10px]">
+                          <div className="flex items-center justify-between font-medium">
+                            <span className="flex items-center gap-1 text-emerald-400">
+                              <TrendingUp className="w-3.5 h-3.5" />
+                              <span>Intérêts cumulés estimés (règle quinzaines) :</span>
+                            </span>
+                            <span className="font-mono text-emerald-400 font-bold">
+                              +{schedule.estimatedInterests.toFixed(2)} €
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>Capital disponible à date de fin :</span>
+                            <span className="font-mono text-slate-100 font-bold">
+                              {schedule.totalAtTarget.toFixed(2)} €
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 }
