@@ -50,25 +50,36 @@ export class RolloverEngine {
    */
   public initializeOrSyncMonth(monthYear: string, autoCarryOverBalance = false): void {
     const syncTransaction = this.database.transaction(() => {
-      // A. S'assurer que l'entrée monthly_balances existe pour ce mois
+      // A. Mettre à jour ou insérer l'entrée monthly_balances pour ce mois
+      // Si autoCarryOverBalance est actif : on calcule le solde net de M-1
+      // Si autoCarryOverBalance est inactif : carried_over_from_previous vaut 0
+      let carriedOverAmount = 0;
+      if (autoCarryOverBalance) {
+        const prevMonth = this.getPreviousMonthYear(monthYear);
+        const prevSummary = this.getMonthlySummary(prevMonth);
+        carriedOverAmount = prevSummary.netBalance;
+      }
+
       const existingBalance = this.database
-        .prepare(`SELECT month_year FROM monthly_balances WHERE month_year = ?`)
-        .get(monthYear);
+        .prepare(`SELECT month_year, is_closed FROM monthly_balances WHERE month_year = ?`)
+        .get(monthYear) as { month_year: string; is_closed: number } | undefined;
 
       if (!existingBalance) {
-        let carriedOverAmount = 0;
-        if (autoCarryOverBalance) {
-          const prevMonth = this.getPreviousMonthYear(monthYear);
-          const prevSummary = this.getMonthlySummary(prevMonth);
-          carriedOverAmount = prevSummary.netBalance;
-        }
-
         this.database
           .prepare(`
             INSERT INTO monthly_balances (month_year, carried_over_from_previous, is_closed)
             VALUES (?, ?, 0)
           `)
           .run(monthYear, carriedOverAmount);
+      } else if (!existingBalance.is_closed) {
+        // Mois non clôturé : synchroniser le report en temps réel selon la valeur de la case à cocher
+        this.database
+          .prepare(`
+            UPDATE monthly_balances 
+            SET carried_over_from_previous = ? 
+            WHERE month_year = ?
+          `)
+          .run(carriedOverAmount, monthYear);
       }
 
       // B. Récupérer tous les modèles qui doivent se répéter (carry_over = 1)

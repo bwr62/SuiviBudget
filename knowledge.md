@@ -56,8 +56,14 @@
 | `client/src/components/Sidebar.tsx` | Barre de navigation latérale 7 onglets (260px) | `Sidebar` | `client/src/store/useUIStore.ts` | Actif |
 | `client/src/components/MonthHeader.tsx` | En-tête de sélection de mois et toggle de report M-1 | `MonthHeader` | `client/src/store/useUIStore.ts` | Actif |
 | `client/src/components/DashboardView.tsx` | Tableau de bord avec 4 KPIs et jauge budgétaire | `DashboardView` | `client/src/types/index.ts` | Actif |
-| `client/src/components/TransactionsTableView.tsx` | Tableaux dynamiques avec case à cocher récurrence et bascule PENDING | `TransactionsTableView` | `client/src/types/index.ts` | Actif |
-| `client/src/components/OnboardingWizard.tsx` | Assistant de première connexion en 6 étapes (Foyer, Revenus, Logement, Crédits, Charges, Bilan) | `OnboardingWizard` | `client/src/types/index.ts` | Actif |
+| `client/src/components/OnboardingWizard.tsx` | Assistant d'onboarding découpé et orchestrateur modulaire | `OnboardingWizard` | `client/src/components/onboarding/*` | Actif |
+| `client/src/components/onboarding/types.ts` | Types TypeScript stricts des étapes de l'onboarding | `TemplateDraft`, `StepProps` | `client/src/types` | Actif |
+| `client/src/components/onboarding/Step1Household.tsx` | Étape 1 : Composition du foyer (adultes, enfants, animaux, paie) | `Step1Household` | `client/src/components/onboarding/types.ts` | Actif |
+| `client/src/components/onboarding/Step2Income.tsx` | Étape 2 : Rentrées d'argent dynamiques et aides sociales | `Step2Income` | `client/src/components/onboarding/types.ts` | Actif |
+| `client/src/components/onboarding/Step3Housing.tsx` | Étape 3 : Logement, loyer, prêts immo avec date de fin | `Step3Housing` | `client/src/components/onboarding/types.ts` | Actif |
+| `client/src/components/onboarding/Step4Loans.tsx` | Étape 4 : Autres crédits & extinction automatique | `Step4Loans` | `client/src/components/onboarding/types.ts` | Actif |
+| `client/src/components/onboarding/Step5RecurringExpenses.tsx` | Étape 5 : Charges fixes & forfaits mobiles personnalisables | `Step5RecurringExpenses` | `client/src/components/onboarding/types.ts` | Actif |
+| `client/src/components/onboarding/Step6Summary.tsx` | Étape 6 : Synthèse financière en direct et validation | `Step6Summary` | `client/src/components/onboarding/types.ts` | Actif |
 | `client/src/components/UpdateScopeModal.tsx` | Boîte de dialogue de choix de portée temporelle (Mois courant vs Mois courant + Futurs) | `UpdateScopeModal` | - | Actif |
 | `server/src/db/verifyPropagation.ts` | Test automatisé de propagation temporelle et d'extinction de prêt | Script de validation | `server/src/db/index.ts`, `server/src/services/rolloverService.ts` | Actif |
 | `client/src/components/CategoriesView.tsx` | Gestion complète : modification catégorie/sous-catégorie & ajout | `CategoriesView` | `client/src/types/index.ts` | Actif |
@@ -141,8 +147,20 @@
 ## 7. JOURNAL DES MODIFICATIONS (CHANGELOG D'AUDIT)
 
 ### [Version 0.05] - 2026-10-15
+* **Refactorisation & Découpage Modulaire de l'Assistant d'Onboarding** :
+  * Découpage complet du fichier monolithique `OnboardingWizard.tsx` (1270 lignes -> ~290 lignes d'orchestration) en sous-modules dédiés dans `client/src/components/onboarding/` :
+    * `types.ts` : Types TypeScript et interfaces partagés (`TemplateDraft`, `StepProps`).
+    * `Step1Household.tsx` : Composition du foyer (adultes, enfants, animaux, jour de paie).
+    * `Step2Income.tsx` : Rentrées d'argent générées selon le foyer et aides sociales/CAF.
+    * `Step3Housing.tsx` : Statut d'habitation, loyer, prêts immobiliers multiples avec date de fin.
+    * `Step4Loans.tsx` : Autres crédits (auto, conso, split-pay) avec date d'extinction.
+    * `Step5RecurringExpenses.tsx` : Forfaits mobiles configurables nominativement et charges fixes.
+    * `Step6Summary.tsx` : Synthèse financière en temps réel (KPIs, reste à vivre) et bilan.
+* **Correction & Réactivité Immédiate du Report de Solde M-1** :
+  * Correction dans `RolloverEngine.initializeOrSyncMonth` : mise à jour dynamique du champ `carried_over_from_previous` dans `monthly_balances` dès que l'utilisateur coche ou décoche la case *"Reporter le solde net de M-1"*, même sur un mois déjà initialisé.
+  * Si la case est décochée, le report est remis à 0 € en direct ; si elle est cochée, le solde net calculé de M-1 est réinjecté immédiatement dans le calcul du reste à vivre sans nécessiter d'opération manuelle en base.
 * **Personnalisation Avancée des Forfaits Mobiles dans l'Assistant de Première Connexion** :
-  * Dans l'étape 5 de l'Onboarding (`OnboardingWizard.tsx`), ajout d'un sélecteur de quantité dynamique (`-` / `+`) pour le nombre de forfaits mobiles du foyer (initialisé par défaut sur le nombre d'adultes).
+  * Dans l'étape 5 de l'Onboarding (`Step5RecurringExpenses.tsx`), ajout d'un sélecteur de quantité dynamique (`-` / `+`) pour le nombre de forfaits mobiles du foyer (initialisé par défaut sur le nombre d'adultes).
   * Pour chaque forfait, ajout d'un champ de saisie dédié au **Libellé personnalisable** (ex: *"Forfait Julien"*, *"Forfait Marie"*, *"Forfait Ado"*) couplé à son montant mensuel distinct.
   * Création de transactions récurrentes distinctes avec leurs libellés respectifs rattachées à la sous-catégorie *Téléphonie & Forfaits mobiles*.
 * **Clarification Pédagogique du Report de Solde Net M-1** :
