@@ -94,7 +94,12 @@ export function App() {
       body: JSON.stringify(data),
     });
     if (res.ok) {
-      await fetchMonthData();
+      const createdTx = await res.json();
+      if (createdTx.month_year && createdTx.month_year !== currentMonthYear) {
+        useUIStore.getState().setCurrentMonthYear(createdTx.month_year);
+      } else {
+        await fetchMonthData();
+      }
     }
   };
 

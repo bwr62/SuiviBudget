@@ -29,7 +29,13 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
   const [formDate, setFormDate] = useState(`${currentMonthYear}-01`);
   const [formCategory, setFormCategory] = useState('');
   const [formSubcategory, setFormSubcategory] = useState('');
+  const [formRecurring, setFormRecurring] = useState(type === 'INCOME' || type === 'RECURRING_EXPENSE');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Synchroniser la date par défaut lorsque le mois change
+  React.useEffect(() => {
+    setFormDate(`${currentMonthYear}-01`);
+  }, [currentMonthYear]);
 
   // Filtrer les transactions selon le type de la vue
   const filteredTransactions = transactions.filter((t) => t.type === type);
@@ -47,11 +53,12 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
         title: formTitle,
         amount: parseFloat(formAmount),
         date: formDate,
-        month_year: currentMonthYear,
+        month_year: formDate.substring(0, 7),
         type,
         category_id: formCategory,
         subcategory_id: formSubcategory || null,
         status: 'ACTIVE',
+        is_recurring: formRecurring,
       });
 
       // Reset
@@ -179,6 +186,23 @@ export const TransactionsTableView: React.FC<TransactionsTableViewProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* Option de récurrence automatique pour mois suivants */}
+          {type !== 'UNFORESEEN_EXPENSE' && (
+            <div className="pt-1">
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={formRecurring}
+                  onChange={(e) => setFormRecurring(e.target.checked)}
+                  className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800"
+                />
+                <span className="font-medium">
+                  Répéter automatiquement chaque mois (se reportera sur les mois suivants)
+                </span>
+              </label>
             </div>
           )}
 

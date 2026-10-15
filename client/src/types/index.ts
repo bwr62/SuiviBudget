@@ -33,6 +33,7 @@ export interface Transaction {
   subcategory_id?: string | null;
   status: 'ACTIVE' | 'PENDING';
   is_carried_over: number;
+  is_recurring?: boolean;
   notes?: string | null;
   category_name?: string;
   category_icon?: string;

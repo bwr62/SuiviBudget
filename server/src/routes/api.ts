@@ -17,7 +17,7 @@ const monthParamSchema = z.object({
 
 const transactionCreateSchema = z.object({
   template_id: z.string().nullable().optional(),
-  month_year: z.string().regex(/^\d{4}-\d{2}$/),
+  month_year: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   title: z.string().min(1).max(255),
   amount: z.number().positive(),
@@ -26,9 +26,21 @@ const transactionCreateSchema = z.object({
   subcategory_id: z.string().nullable().optional(),
   status: z.enum(['ACTIVE', 'PENDING']).default('ACTIVE'),
   notes: z.string().nullable().optional(),
+  is_recurring: z.boolean().optional(), // Si true, crée un modèle récurrent automatiquement
 });
 
-const transactionUpdateSchema = transactionCreateSchema.partial();
+const transactionUpdateSchema = z.object({
+  template_id: z.string().nullable().optional(),
+  month_year: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  title: z.string().min(1).max(255).optional(),
+  amount: z.number().positive().optional(),
+  type: z.enum(['INCOME', 'RECURRING_EXPENSE', 'CURRENT_EXPENSE', 'UNFORESEEN_EXPENSE']).optional(),
+  category_id: z.string().min(1).optional(),
+  subcategory_id: z.string().nullable().optional(),
+  status: z.enum(['ACTIVE', 'PENDING']).optional(),
+  notes: z.string().nullable().optional(),
+});
 
 const toggleStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'PENDING']),
@@ -46,12 +58,30 @@ const recurringTemplateCreateSchema = z.object({
   carry_over: z.number().int().min(0).max(1).default(1),
 });
 
+const recurringTemplateUpdateSchema = recurringTemplateCreateSchema.partial();
+
 const categoryCreateSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.enum(['INCOME', 'RECURRING_EXPENSE', 'CURRENT_EXPENSE', 'UNFORESEEN_EXPENSE']),
   icon: z.string().min(1),
   color: z.string().min(1),
   subcategories: z.array(z.string().min(1)).optional(),
+});
+
+const categoryUpdateSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  type: z.enum(['INCOME', 'RECURRING_EXPENSE', 'CURRENT_EXPENSE', 'UNFORESEEN_EXPENSE']).optional(),
+  icon: z.string().min(1).optional(),
+  color: z.string().min(1).optional(),
+  is_active: z.number().min(0).max(1).optional(),
+});
+
+const subcategoryCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+});
+
+const subcategoryUpdateSchema = z.object({
+  name: z.string().min(1).max(100),
 });
 
 // ==========================================
@@ -114,34 +144,66 @@ apiRouter.post('/transactions', (req: Request, res: Response) => {
   const data = parse.data;
   const id = crypto.randomUUID();
 
-  // Si c'est une dépense imprévue, elle n'est jamais reportée ni issue d'un template
-  const templateId = data.type === 'UNFORESEEN_EXPENSE' ? null : (data.template_id ?? null);
+  // CORRECTION CLÉ : Le month_year DOIT être dérivé de la date saisie (ex: 2026-09-15 -> 2026-09)
+  const derivedMonthYear = data.date.substring(0, 7);
 
-  db.prepare(`
-    INSERT INTO transactions (
-      id, template_id, month_year, date, title, amount, type,
-      category_id, subcategory_id, status, is_carried_over, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-  `).run(
-    id,
-    templateId,
-    data.month_year,
-    data.date,
-    data.title,
-    data.amount,
-    data.type,
-    data.category_id,
-    data.subcategory_id ?? null,
-    data.status,
-    data.notes ?? null
-  );
+  // Vérifier si la transaction doit automatiquement créer un modèle de récurrence
+  let templateId: string | null = null;
+  const shouldRecur =
+    data.type !== 'UNFORESEEN_EXPENSE' &&
+    (data.is_recurring === true || data.type === 'RECURRING_EXPENSE');
+
+  const tx = db.transaction(() => {
+    if (shouldRecur) {
+      templateId = crypto.randomUUID();
+      const dayOfMonth = parseInt(data.date.substring(8, 10), 10) || 1;
+
+      db.prepare(`
+        INSERT INTO recurring_templates (
+          id, title, amount, type, category_id, subcategory_id, day_of_month, status, carry_over
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `).run(
+        templateId,
+        data.title,
+        data.amount,
+        data.type,
+        data.category_id,
+        data.subcategory_id ?? null,
+        dayOfMonth,
+        data.status === 'PENDING' ? 'PENDING_PAUSED' : 'ACTIVE'
+      );
+    } else if (data.template_id && data.type !== 'UNFORESEEN_EXPENSE') {
+      templateId = data.template_id;
+    }
+
+    db.prepare(`
+      INSERT INTO transactions (
+        id, template_id, month_year, date, title, amount, type,
+        category_id, subcategory_id, status, is_carried_over, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `).run(
+      id,
+      templateId,
+      derivedMonthYear,
+      data.date,
+      data.title,
+      data.amount,
+      data.type,
+      data.category_id,
+      data.subcategory_id ?? null,
+      data.status,
+      data.notes ?? null
+    );
+  });
+
+  tx();
 
   const created = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
   res.status(201).json(created);
 });
 
 apiRouter.patch('/transactions/:id', (req: Request, res: Response) => {
-  const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
+  const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id) as any;
   if (!tx) {
     res.status(404).json({ error: 'Transaction introuvable' });
     return;
@@ -154,6 +216,12 @@ apiRouter.patch('/transactions/:id', (req: Request, res: Response) => {
   }
 
   const fields = parse.data;
+
+  // Si la date change, synchroniser automatiquement month_year
+  if (fields.date && !fields.month_year) {
+    fields.month_year = fields.date.substring(0, 7);
+  }
+
   const updates: string[] = [];
   const values: any[] = [];
 
@@ -253,6 +321,37 @@ apiRouter.post('/recurring-templates', (req: Request, res: Response) => {
   res.status(201).json(created);
 });
 
+apiRouter.patch('/recurring-templates/:id', (req: Request, res: Response) => {
+  const tpl = db.prepare('SELECT * FROM recurring_templates WHERE id = ?').get(req.params.id);
+  if (!tpl) {
+    res.status(404).json({ error: 'Modèle introuvable' });
+    return;
+  }
+
+  const parse = recurringTemplateUpdateSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Données invalides', details: parse.error.format() });
+    return;
+  }
+
+  const fields = parse.data;
+  const updates: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, val] of Object.entries(fields)) {
+    updates.push(`${key} = ?`);
+    values.push(val);
+  }
+
+  if (updates.length > 0) {
+    values.push(req.params.id);
+    db.prepare(`UPDATE recurring_templates SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  const updated = db.prepare('SELECT * FROM recurring_templates WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
 apiRouter.delete('/recurring-templates/:id', (req: Request, res: Response) => {
   const result = db.prepare('DELETE FROM recurring_templates WHERE id = ?').run(req.params.id);
   if (result.changes === 0) {
@@ -263,7 +362,7 @@ apiRouter.delete('/recurring-templates/:id', (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 4. CATÉGORIES & SOUS-CATÉGORIES
+// 4. CATÉGORIES & SOUS-CATÉGORIES (CRUD COMPLET)
 // ==========================================
 
 apiRouter.get('/categories', (_req: Request, res: Response) => {
@@ -308,6 +407,95 @@ apiRouter.post('/categories', (req: Request, res: Response) => {
 
   const created = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
   res.status(201).json(created);
+});
+
+// MODIFICATION D'UNE CATÉGORIE EXISTANTE
+apiRouter.patch('/categories/:id', (req: Request, res: Response) => {
+  const cat = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  if (!cat) {
+    res.status(404).json({ error: 'Catégorie introuvable' });
+    return;
+  }
+
+  const parse = categoryUpdateSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Données invalides', details: parse.error.format() });
+    return;
+  }
+
+  const fields = parse.data;
+  const updates: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, val] of Object.entries(fields)) {
+    updates.push(`${key} = ?`);
+    values.push(val);
+  }
+
+  if (updates.length > 0) {
+    values.push(req.params.id);
+    db.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  const updated = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
+// AJOUT D'UNE SOUS-CATÉGORIE DANS UNE CATÉGORIE EXISTANTE
+apiRouter.post('/categories/:id/subcategories', (req: Request, res: Response) => {
+  const cat = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  if (!cat) {
+    res.status(404).json({ error: 'Catégorie introuvable' });
+    return;
+  }
+
+  const parse = subcategoryCreateSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Nom de sous-catégorie invalide' });
+    return;
+  }
+
+  const subId = 'sub-' + crypto.randomUUID().substring(0, 8);
+  db.prepare(`
+    INSERT INTO subcategories (id, category_id, name)
+    VALUES (?, ?, ?)
+  `).run(subId, req.params.id, parse.data.name.trim());
+
+  const created = db.prepare('SELECT * FROM subcategories WHERE id = ?').get(subId);
+  res.status(201).json(created);
+});
+
+// MODIFICATION D'UNE SOUS-CATÉGORIE
+apiRouter.patch('/subcategories/:id', (req: Request, res: Response) => {
+  const sub = db.prepare('SELECT * FROM subcategories WHERE id = ?').get(req.params.id);
+  if (!sub) {
+    res.status(404).json({ error: 'Sous-catégorie introuvable' });
+    return;
+  }
+
+  const parse = subcategoryUpdateSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Nom de sous-catégorie invalide' });
+    return;
+  }
+
+  db.prepare('UPDATE subcategories SET name = ? WHERE id = ?').run(
+    parse.data.name.trim(),
+    req.params.id
+  );
+
+  const updated = db.prepare('SELECT * FROM subcategories WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
+// SUPPRESSION D'UNE SOUS-CATÉGORIE
+apiRouter.delete('/subcategories/:id', (req: Request, res: Response) => {
+  const result = db.prepare('DELETE FROM subcategories WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Sous-catégorie introuvable' });
+    return;
+  }
+  res.json({ success: true });
 });
 
 // ==========================================
