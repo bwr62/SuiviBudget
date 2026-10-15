@@ -10,11 +10,17 @@ import { useUIStore } from './store/useUIStore';
 import { MonthlySummary, Transaction, Category } from './types';
 
 export function App() {
-  const { currentMonthYear, activeTab, autoCarryOverBalance } = useUIStore();
+  const { currentMonthYear, activeTab, autoCarryOverBalance, theme } = useUIStore();
 
   const [user, setUser] = useState<{ id: string; username: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [hasExistingUser, setHasExistingUser] = useState(false);
+
+  // Synchronisation du thème sur l'élément body
+  useEffect(() => {
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add(`theme-${theme}`);
+  }, [theme]);
 
   const [summary, setSummary] = useState<MonthlySummary | undefined>();
   const [transactions, setTransactions] = useState<Transaction[]>([]);

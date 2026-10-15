@@ -9,12 +9,17 @@ export type TabType =
   | 'categories'
   | 'analytics';
 
+export type Theme = 'dark' | 'light';
+
 interface UIState {
   currentMonthYear: string;
   activeTab: TabType;
+  theme: Theme;
   autoCarryOverBalance: boolean;
   setCurrentMonthYear: (monthYear: string) => void;
   setActiveTab: (tab: TabType) => void;
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
   setAutoCarryOverBalance: (value: boolean) => void;
   nextMonth: () => void;
   prevMonth: () => void;
@@ -27,12 +32,28 @@ function getInitialMonth(): string {
   return `${year}-${month}`;
 }
 
+function getSavedTheme(): Theme {
+  const saved = localStorage.getItem('app_theme');
+  return saved === 'light' ? 'light' : 'dark';
+}
+
 export const useUIStore = create<UIState>((set) => ({
   currentMonthYear: getInitialMonth(),
   activeTab: 'dashboard',
+  theme: getSavedTheme(),
   autoCarryOverBalance: false,
   setCurrentMonthYear: (monthYear) => set({ currentMonthYear: monthYear }),
   setActiveTab: (tab) => set({ activeTab: tab }),
+  setTheme: (theme) => {
+    localStorage.setItem('app_theme', theme);
+    set({ theme });
+  },
+  toggleTheme: () =>
+    set((state) => {
+      const nextTheme: Theme = state.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('app_theme', nextTheme);
+      return { theme: nextTheme };
+    }),
   setAutoCarryOverBalance: (value) => set({ autoCarryOverBalance: value }),
   nextMonth: () =>
     set((state) => {

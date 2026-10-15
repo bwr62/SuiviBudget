@@ -145,6 +145,10 @@
   * Dans `TransactionsTableView.tsx`, ajout d'une case à cocher *"Répéter automatiquement chaque mois (se reportera sur les mois suivants)"* activée par défaut pour les rentrées d'argent et les charges fixes.
   * Création automatique d'une entrée dans `recurring_templates` avec `day_of_month` dérivé du jour de la date saisie et statut respecté (`ACTIVE` ou `PENDING`).
   * Vérification par test automatisé (`server/src/db/verifyMonthRoll.ts`) : une opération récurrente saisie sur septembre est immédiatement et fidèlement répliquée sur octobre lors de son ouverture.
+* **Audit Qualité & Support Thème Sombre / Thème Clair** :
+  * Réalisation de l'audit technique et architectural complet consigné dans le rapport `audit_report_v0.02.md`.
+  * Intégration d'un sélecteur de thème dynamique dans la barre latérale (`Sun` / `Moon`).
+  * Support complet du Thème Clair (`body.theme-light`) avec persistance dans le `localStorage` et palette optimisée.
 
 ### [Version 0.01] - 2026-10-15
 * Initialisation du monorepo npm `/server` et `/client`.
