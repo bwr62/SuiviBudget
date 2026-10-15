@@ -121,6 +121,16 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    name: '008_savings_interest_rate',
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info(savings_goals)").all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'interest_rate')) {
+        db.exec("ALTER TABLE savings_goals ADD COLUMN interest_rate REAL DEFAULT NULL;");
+      }
+    },
+  },
 ];
 
 /**

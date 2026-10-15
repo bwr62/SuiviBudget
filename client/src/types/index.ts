@@ -23,6 +23,7 @@ export interface SavingsGoal {
   target_amount: number;
   current_amount: number;
   target_date?: string | null;
+  interest_rate?: number | null; // Taux net annuel en %
   icon?: string;
   color?: string;
   created_at?: string;

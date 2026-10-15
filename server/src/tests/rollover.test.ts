@@ -248,5 +248,30 @@ describe('RolloverEngine Unit Tests', () => {
       assert.equal(goal.current_amount, 500.00);
       assert.equal(goal.target_amount, 1500.00);
     });
+
+    it('should support net interest rate and estimate compound interests', () => {
+      // Créer un projet d'épargne Livret A avec taux de 3% et échéance à 12 mois
+      inMemoryDb.prepare(`
+        INSERT INTO savings_goals (id, title, target_amount, current_amount, target_date, interest_rate, color)
+        VALUES ('goal-livreta', 'Livret A Précaution', 5000.00, 2000.00, '2027-10', 3.00, '#10B981')
+      `).run();
+
+      const goal = inMemoryDb.prepare('SELECT interest_rate, current_amount FROM savings_goals WHERE id = ?').get('goal-livreta') as {
+        interest_rate: number;
+        current_amount: number;
+      };
+
+      assert.equal(goal.interest_rate, 3.00);
+      assert.equal(goal.current_amount, 2000.00);
+
+      // Calcul prévisionnel pour 12 mois à 3% net : 2000 * 0.03 = 60.00€
+      const monthsRemaining = 12;
+      const years = monthsRemaining / 12;
+      const totalEstimated = goal.current_amount * Math.pow(1 + goal.interest_rate / 100, years);
+      const estimatedInterests = Math.round((totalEstimated - goal.current_amount) * 100) / 100;
+
+      assert.equal(estimatedInterests, 60.00);
+      assert.equal(Math.round(totalEstimated * 100) / 100, 2060.00);
+    });
   });
 });

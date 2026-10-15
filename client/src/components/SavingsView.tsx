@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PiggyBank, Plus, Target, Trash2, Calendar, Coins } from 'lucide-react';
+import { PiggyBank, Plus, Target, Trash2, Calendar, Coins, TrendingUp, Percent, Edit2 } from 'lucide-react';
 import { SavingsGoal, SavingsAllocation } from '../types';
 import { showToast } from '../store/useToastStore';
 
@@ -14,16 +14,63 @@ const PRESET_COLORS = [
   '#8B5CF6', '#EC4899', '#F59E0B', '#14B8A6',
 ];
 
+/**
+ * Calcule le nombre de mois restants entre deux mois 'YYYY-MM'.
+ */
+function getMonthsDiff(startMonthYear: string, endMonthYear: string): number {
+  const startParts = startMonthYear.split('-');
+  const endParts = endMonthYear.split('-');
+  const startY = Number(startParts[0] || 0);
+  const startM = Number(startParts[1] || 1);
+  const endY = Number(endParts[0] || 0);
+  const endM = Number(endParts[1] || 1);
+  return Math.max(0, (endY - startY) * 12 + (endM - startM));
+}
+
+/**
+ * Calcule les intérêts composés prévisionnels en fonction du montant actuel,
+ * du taux net annuel et de la date de fin estimée (en mois).
+ */
+export function calculateEstimatedInterests(
+  currentAmount: number,
+  annualRateNetPercent: number | null | undefined,
+  currentMonthYear: string,
+  targetDateMonthYear: string | null | undefined
+): { monthsRemaining: number; estimatedInterests: number; totalEstimated: number } {
+  if (!annualRateNetPercent || annualRateNetPercent <= 0 || !targetDateMonthYear) {
+    return { monthsRemaining: 0, estimatedInterests: 0, totalEstimated: currentAmount };
+  }
+
+  const monthsRemaining = getMonthsDiff(currentMonthYear, targetDateMonthYear);
+  if (monthsRemaining <= 0 || currentAmount <= 0) {
+    return { monthsRemaining, estimatedInterests: 0, totalEstimated: currentAmount };
+  }
+
+  const years = monthsRemaining / 12;
+  const rateDecimal = annualRateNetPercent / 100;
+  // Intérêts composés annuels : A = P * (1 + r)^t
+  const totalEstimated = currentAmount * Math.pow(1 + rateDecimal, years);
+  const estimatedInterests = Math.max(0, totalEstimated - currentAmount);
+
+  return {
+    monthsRemaining,
+    estimatedInterests: Math.round(estimatedInterests * 100) / 100,
+    totalEstimated: Math.round(totalEstimated * 100) / 100,
+  };
+}
+
 export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savingsCapacity }) => {
   const queryClient = useQueryClient();
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
   const [selectedGoalForAlloc, setSelectedGoalForAlloc] = useState<SavingsGoal | null>(null);
+  const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
 
-  // Formulaire d'ajout
+  // Formulaire d'ajout / édition
   const [title, setTitle] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [initialAmount, setInitialAmount] = useState('');
   const [targetDate, setTargetDate] = useState('');
+  const [interestRate, setInterestRate] = useState('');
   const [color, setColor] = useState('#10B981');
 
   // Formulaire d'allocation rapide
@@ -53,9 +100,31 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
   const totalAllocatedThisMonth = allocations.reduce((sum, a) => sum + a.amount, 0);
   const remainingSavingsCapacity = Math.max(0, savingsCapacity - totalAllocatedThisMonth);
 
+  const resetForm = () => {
+    setTitle('');
+    setTargetAmount('');
+    setInitialAmount('');
+    setTargetDate('');
+    setInterestRate('');
+    setColor('#10B981');
+    setEditingGoal(null);
+  };
+
+  const openEditModal = (goal: SavingsGoal) => {
+    setEditingGoal(goal);
+    setTitle(goal.title);
+    setTargetAmount(String(goal.target_amount));
+    setInitialAmount(String(goal.current_amount));
+    setTargetDate(goal.target_date || '');
+    setInterestRate(goal.interest_rate !== undefined && goal.interest_rate !== null ? String(goal.interest_rate) : '');
+    setColor(goal.color || '#10B981');
+    setShowAddGoalModal(true);
+  };
+
   // Mutation Création
   const createGoalMutation = useMutation({
     mutationFn: async () => {
+      const parsedRate = interestRate ? parseFloat(interestRate.replace(',', '.')) : null;
       const res = await fetch('/api/savings/goals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -65,6 +134,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
           target_amount: parseFloat(targetAmount.replace(',', '.')),
           current_amount: initialAmount ? parseFloat(initialAmount.replace(',', '.')) : 0,
           target_date: targetDate || null,
+          interest_rate: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
           color,
         }),
       });
@@ -75,10 +145,36 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
       queryClient.invalidateQueries({ queryKey: ['savingsGoals'] });
       showToast({ message: 'Projet d\'épargne créé avec succès !', type: 'success' });
       setShowAddGoalModal(false);
-      setTitle('');
-      setTargetAmount('');
-      setInitialAmount('');
-      setTargetDate('');
+      resetForm();
+    },
+  });
+
+  // Mutation Modification
+  const updateGoalMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingGoal) return;
+      const parsedRate = interestRate ? parseFloat(interestRate.replace(',', '.')) : null;
+      const res = await fetch(`/api/savings/goals/${editingGoal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: title.trim(),
+          target_amount: parseFloat(targetAmount.replace(',', '.')),
+          current_amount: parseFloat(initialAmount.replace(',', '.')),
+          target_date: targetDate || null,
+          interest_rate: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
+          color,
+        }),
+      });
+      if (!res.ok) throw new Error('Erreur modification objectif');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['savingsGoals'] });
+      showToast({ message: 'Projet d\'épargne mis à jour !', type: 'success' });
+      setShowAddGoalModal(false);
+      resetForm();
     },
   });
 
@@ -181,6 +277,12 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
           {goals.map((goal) => {
             const pct = Math.min(100, Math.round((goal.current_amount / goal.target_amount) * 100));
             const isCompleted = goal.current_amount >= goal.target_amount;
+            const interestInfo = calculateEstimatedInterests(
+              goal.current_amount,
+              goal.interest_rate,
+              currentMonthYear,
+              goal.target_date
+            );
 
             return (
               <div
@@ -197,26 +299,43 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-slate-100">{goal.title}</h4>
-                      {goal.target_date && (
-                        <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
-                          <Calendar className="w-3 h-3" />
-                          <span>Objectif {goal.target_date}</span>
-                        </div>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                        {goal.target_date && (
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            <span>Objectif {goal.target_date}</span>
+                          </div>
+                        )}
+                        {goal.interest_rate !== undefined && goal.interest_rate !== null && goal.interest_rate > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[10px] rounded bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
+                            <Percent className="w-2.5 h-2.5" />
+                            {goal.interest_rate}% net/an
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      if (confirm(`Supprimer la tirelire "${goal.title}" ?`)) {
-                        deleteGoalMutation.mutate(goal.id);
-                      }
-                    }}
-                    className="p-1 text-slate-500 hover:text-rose-400 rounded transition"
-                    title="Supprimer la tirelire"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => openEditModal(goal)}
+                      className="p-1 text-slate-500 hover:text-slate-300 rounded transition"
+                      title="Modifier la tirelire"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Supprimer la tirelire "${goal.title}" ?`)) {
+                          deleteGoalMutation.mutate(goal.id);
+                        }
+                      }}
+                      className="p-1 text-slate-500 hover:text-rose-400 rounded transition"
+                      title="Supprimer la tirelire"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -239,6 +358,27 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                     />
                   </div>
                 </div>
+
+                {/* Bloc Calcul Intérêts Estimés */}
+                {goal.interest_rate && goal.interest_rate > 0 && goal.target_date && (
+                  <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] space-y-1">
+                    <div className="flex items-center justify-between text-slate-300 font-medium">
+                      <span className="flex items-center gap-1 text-emerald-400">
+                        <TrendingUp className="w-3 h-3" />
+                        <span>Intérêts nets estimés :</span>
+                      </span>
+                      <span className="font-mono font-bold text-emerald-400">
+                        +{interestInfo.estimatedInterests.toFixed(2)} €
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                      <span>Capital à terme ({interestInfo.monthsRemaining} mois) :</span>
+                      <span className="font-mono text-slate-200 font-semibold">
+                        {interestInfo.totalEstimated.toFixed(2)} €
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-1 flex items-center justify-between border-t border-slate-800/80">
                   <span className="text-[11px] text-slate-400 font-medium">
@@ -266,13 +406,13 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
         </div>
       )}
 
-      {/* Modal Création Objectif */}
+      {/* Modal Création / Modification Objectif */}
       {showAddGoalModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl">
             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
               <PiggyBank className="w-4 h-4 text-emerald-400" />
-              <span>Nouveau projet d'épargne</span>
+              <span>{editingGoal ? "Modifier le projet d'épargne" : "Nouveau projet d'épargne"}</span>
             </h3>
 
             <div className="space-y-3 text-xs">
@@ -282,7 +422,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                   type="text"
                   required
                   autoFocus
-                  placeholder="Ex: Vacances, Fonds d'urgence, Travaux..."
+                  placeholder="Ex: Vacances, Livret A, Fonds d'urgence..."
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
@@ -304,7 +444,7 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Déjà épargné (€)</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Épargne actuelle (€)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -317,15 +457,55 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Date cible (Optionnel, YYYY-MM)</label>
-                <input
-                  type="month"
-                  value={targetDate}
-                  onChange={(e) => setTargetDate(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Date de fin estimée (YYYY-MM)</label>
+                  <input
+                    type="month"
+                    value={targetDate}
+                    onChange={(e) => setTargetDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Taux net annuel (%)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="Ex: 3.0 (Livret A)"
+                    value={interestRate}
+                    onChange={(e) => setInterestRate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
+
+              {/* Aperçu en direct des intérêts dans la modale */}
+              {(() => {
+                const parsedRate = parseFloat(interestRate.replace(',', '.'));
+                const parsedAmount = parseFloat(initialAmount.replace(',', '.'));
+                if (parsedRate > 0 && parsedAmount > 0 && targetDate) {
+                  const preview = calculateEstimatedInterests(parsedAmount, parsedRate, currentMonthYear, targetDate);
+                  return (
+                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] space-y-1 text-emerald-300">
+                      <div className="flex items-center justify-between font-semibold">
+                        <span className="flex items-center gap-1">
+                          <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Simulation d'intérêts ({preview.monthsRemaining} mois) :</span>
+                        </span>
+                        <span className="font-mono text-emerald-400 font-bold">+{preview.estimatedInterests.toFixed(2)} €</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                        <span>Capital prévisionnel à terme :</span>
+                        <span className="font-mono text-slate-200">{preview.totalEstimated.toFixed(2)} €</span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">Couleur</label>
@@ -348,18 +528,29 @@ export const SavingsView: React.FC<SavingsViewProps> = ({ currentMonthYear, savi
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 text-xs">
               <button
                 type="button"
-                onClick={() => setShowAddGoalModal(false)}
+                onClick={() => {
+                  setShowAddGoalModal(false);
+                  resetForm();
+                }}
                 className="px-3 py-1.5 text-slate-400 hover:text-slate-200"
               >
                 Annuler
               </button>
               <button
                 type="button"
-                disabled={!title.trim() || !targetAmount || createGoalMutation.isPending}
-                onClick={() => createGoalMutation.mutate()}
+                disabled={!title.trim() || !targetAmount || createGoalMutation.isPending || updateGoalMutation.isPending}
+                onClick={() => {
+                  if (editingGoal) {
+                    updateGoalMutation.mutate();
+                  } else {
+                    createGoalMutation.mutate();
+                  }
+                }}
                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-sm disabled:opacity-50"
               >
-                {createGoalMutation.isPending ? 'Création...' : 'Créer le projet'}
+                {editingGoal
+                  ? updateGoalMutation.isPending ? 'Enregistrement...' : 'Enregistrer'
+                  : createGoalMutation.isPending ? 'Création...' : 'Créer le projet'}
               </button>
             </div>
           </div>

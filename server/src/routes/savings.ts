@@ -12,6 +12,7 @@ const goalCreateSchema = z.object({
   target_amount: z.number().positive(),
   current_amount: z.number().min(0).default(0),
   target_date: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
+  interest_rate: z.number().min(0).max(100).nullable().optional(),
   icon: z.string().default('PiggyBank'),
   color: z.string().default('#10B981'),
 });
@@ -49,14 +50,15 @@ savingsRouter.post('/goals', (req: Request, res: Response) => {
   const id = 'goal-' + crypto.randomUUID().substring(0, 8);
 
   db.prepare(`
-    INSERT INTO savings_goals (id, title, target_amount, current_amount, target_date, icon, color)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO savings_goals (id, title, target_amount, current_amount, target_date, interest_rate, icon, color)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.title,
     roundCurrency(data.target_amount),
     roundCurrency(data.current_amount),
     data.target_date ?? null,
+    data.interest_rate !== undefined && data.interest_rate !== null ? roundCurrency(data.interest_rate) : null,
     data.icon,
     data.color
   );
@@ -102,6 +104,10 @@ savingsRouter.patch('/goals/:id', (req: Request, res: Response) => {
   if (data.target_date !== undefined) {
     updates.push('target_date = ?');
     values.push(data.target_date);
+  }
+  if (data.interest_rate !== undefined) {
+    updates.push('interest_rate = ?');
+    values.push(data.interest_rate !== null ? roundCurrency(data.interest_rate) : null);
   }
   if (data.icon !== undefined) {
     updates.push('icon = ?');

@@ -48,6 +48,7 @@ export interface SavingsGoal {
   target_amount: number;
   current_amount: number;
   target_date?: string | null;
+  interest_rate?: number | null; // Taux de rémunération annuel net (en %, ex: 3.0 pour 3%)
   icon?: string;
   color?: string;
   created_at?: string;
@@ -198,6 +199,7 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   target_amount REAL NOT NULL,
   current_amount REAL NOT NULL DEFAULT 0.0,
   target_date TEXT,
+  interest_rate REAL DEFAULT NULL,
   icon TEXT DEFAULT 'PiggyBank',
   color TEXT DEFAULT '#10B981',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
